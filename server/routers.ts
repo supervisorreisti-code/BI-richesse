@@ -95,6 +95,27 @@ export const appRouter = router({
       .mutation(({ input, ctx }) =>
         db.importarLote(input.lojas, input.rankings, ctx.user?.name ?? undefined)
       ),
+    listarAuditoria: adminProcedure
+      .input(z.object({ limit: z.number().min(1).max(500).default(200) }).optional())
+      .query(({ input }) => db.listarAuditoria(input?.limit ?? 200)),
+    criarBackup: adminProcedure.mutation(async ({ ctx }) => {
+      const user = ctx.user?.name ?? undefined;
+      const snapshot = await db.snapshotCompleto();
+      const { storagePut } = await import("./storage");
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      const payload = JSON.stringify(snapshot);
+      const res = await storagePut(`backups/bi-richesse-${stamp}.json`, payload, "application/json; charset=utf-8");
+      await db.insereBackup({
+        storageKey: res.key,
+        usuario: user ?? null,
+        tipo: "manual",
+        descricao: `Backup automático — ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}`,
+        registrosLojas: snapshot.lojas.length,
+        registrosRanking: snapshot.rankings.length,
+      });
+      return { ok: true, storageKey: res.key, url: res.url, registrosLojas: snapshot.lojas.length, registrosRanking: snapshot.rankings.length };
+    }),
+    listarBackups: adminProcedure.query(() => db.listarBackups()),
     resetarBanco: adminProcedure
       .input(z.object({}).optional())
       .mutation(async ({ ctx }) => {

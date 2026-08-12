@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -92,6 +92,7 @@ export async function getUserByOpenId(openId: string) {
 // --- BI Richesse ---
 import {
   auditLog,
+  backupSnapshots,
   lojasPeriodos,
   rankingVendedores,
 } from "../drizzle/schema";
@@ -343,4 +344,48 @@ export async function resetarParaOficiais(usuario?: string) {
   });
   // O reenvio dos dados oficiais é feito pelo seed (scripts/seed-bi.mjs) ou pelo
   // importLote com o payload oficial — este helper apenas limpa.
+}
+
+// --- Backup do sistema ---
+
+export async function insereBackup(meta: {
+  storageKey: string;
+  usuario: string | null;
+  tipo: string;
+  descricao: string | null;
+  registrosLojas: number;
+  registrosRanking: number;
+}) {
+  const db = requireDb(await getDb());
+  return db.insert(backupSnapshots).values(meta);
+}
+
+export async function listarBackups() {
+  const db = requireDb(await getDb());
+  return db.select().from(backupSnapshots).orderBy(desc(backupSnapshots.criadoEm)).limit(50);
+}
+
+// --- Auditoria visível ---
+
+export async function listarAuditoria(limit = 200) {
+  const db = requireDb(await getDb());
+  return db
+    .select()
+    .from(auditLog)
+    .orderBy(desc(auditLog.criadoEm))
+    .limit(limit);
+}
+
+// --- Backup do sistema (snapshot completo no storage S3) ---
+
+export async function snapshotCompleto() {
+  const db = requireDb(await getDb());
+  const lojas = await db.select().from(lojasPeriodos).orderBy(asc(lojasPeriodos.periodo), asc(lojasPeriodos.loja));
+  const rankings = await db
+    .select()
+    .from(rankingVendedores)
+    .where(eq(rankingVendedores.isDeleted, 0))
+    .orderBy(asc(rankingVendedores.periodo), asc(rankingVendedores.loja), asc(rankingVendedores.posicao));
+  const auditoria = await db.select().from(auditLog).orderBy(desc(auditLog.criadoEm));
+  return { geradoEm: new Date().toISOString(), lojas, rankings, auditoria };
 }

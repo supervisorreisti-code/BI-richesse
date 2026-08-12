@@ -66,3 +66,20 @@ export const auditLog = mysqlTable("audit_log", {
 
 export type AuditEntry = typeof auditLog.$inferSelect;
 export type InsertAuditEntry = typeof auditLog.$inferInsert;
+
+// --- BI Richesse: snapshots de backup (S3 + metadados no banco) ---
+
+export const backupSnapshots = mysqlTable("backup_snapshots", {
+  id: int("id").autoincrement().primaryKey(),
+  criadoEm: timestamp("criado_em").defaultNow().notNull(),
+  usuario: varchar("usuario", { length: 255 }),
+  tipo: varchar("tipo", { length: 32 }).default("manual").notNull(),
+  /** Chave do arquivo JSON no storage (/manus-storage/...) */
+  storageKey: varchar("storage_key", { length: 255 }).notNull(),
+  descricao: varchar("descricao", { length: 255 }),
+  registrosLojas: int("registros_lojas").notNull().default(0),
+  registrosRanking: int("registros_ranking").notNull().default(0),
+});
+
+export type BackupSnapshot = typeof backupSnapshots.$inferSelect;
+export type InsertBackupSnapshot = typeof backupSnapshots.$inferInsert;

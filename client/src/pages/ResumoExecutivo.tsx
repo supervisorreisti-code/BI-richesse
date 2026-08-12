@@ -76,6 +76,16 @@ export default function ResumoExecutivo() {
   const melhorLoja = lojasDoPeriodo[0];
   const piorLoja = lojasDoPeriodo[linhas.length - 1];
 
+  // Top geral de vendedores entre todas as lojas do período (maiores vendas individuais)
+  const topGeral = useMemo(() => {
+    const p = filtrosValidos.periodo;
+    return [...store.rankingVendedores]
+      .filter((r) => r.periodo === p)
+      .sort((a, b) => b.vendas - a.vendas)
+      .slice(0, 3)
+      .map((r) => ({ vendedor: r.vendedor, loja: r.loja, vendas: r.vendas }));
+  }, [store.rankingVendedores, filtrosValidos.periodo]);
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
       {/* Barra superior compacta */}
@@ -178,6 +188,26 @@ export default function ResumoExecutivo() {
                     valor={melhor.vendedor}
                     sub={`${fmtMoeda(melhor.vendas)} em vendas`}
                   />
+                )}
+                {/* Top geral: maiores vendas individuais entre todas as lojas */}
+                {topGeral.length > 0 && (
+                  <div className="rounded-lg border bg-card p-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Top geral — vendedores entre lojas</div>
+                    <ul className="mt-1.5 space-y-1">
+                      {topGeral.map((t, i) => (
+                        <li key={i} className="flex items-center justify-between gap-2 text-xs">
+                          <span className="flex items-center gap-2">
+                            <span className="flex h-4 w-4 items-center justify-center rounded bg-navy/10 text-[10px] font-bold text-navy">
+                              {i + 1}
+                            </span>
+                            <span className="font-medium">{t.vendedor}</span>
+                            <span className="text-muted-foreground">{t.loja}</span>
+                          </span>
+                          <span className="tabular-nums font-semibold text-navy">{fmtMoeda(t.vendas)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
               </div>
             </Panel>

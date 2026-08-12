@@ -7,7 +7,8 @@
  */
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Download, FileJson, Plus, RotateCcw, Save, Trash2, Upload } from "lucide-react";
+import { trpc } from "@/lib/trpc";
+import { Download, FileJson, Plus, RotateCcw, Save, ShieldCheck, ShieldAlert, Trash2, Upload, Archive, History } from "lucide-react";
 import { Header, Panel, StatusChip, DataBar, fmtPct, corStatus } from "@/components/bi/shared";
 import {
   useDataStore,
@@ -53,11 +54,168 @@ function ResumoCard({
   );
 }
 
-type Aba = "lojas" | "vendedores" | "importar";
+type Aba = "lojas" | "vendedores" | "importar" | "auditoria" | "backup";
+
+/* ----------------------------------------------------------------------------
+ * Aba: Histórico de auditoria (quem alterou o quê, valor antigo → novo)
+ * --------------------------------------------------------------------------*/
+function AbaAuditoria() {
+  const auditoria = trpc.bi.listarAuditoria.useQuery({ limit: 200 });
+  return (
+    <div className="mt-6">
+      <Panel
+        titulo="Histórico de auditoria"
+        subtitulo="Toda alteração feita no painel fica registrada: quem alterou, o quê e o valor antes/depois."
+      >
+        {auditoria.isLoading ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">Carregando histórico…</p>
+        ) : auditoria.data && auditoria.data.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs sm:text-sm">
+              <thead>
+                <tr className="border-b border-border text-left">
+                  <th className="py-2 pr-3 font-semibold text-muted-foreground">Data/hora</th>
+                  <th className="px-3 py-2 font-semibold text-muted-foreground">Usuário</th>
+                  <th className="px-3 py-2 font-semibold text-muted-foreground">O quê</th>
+                  <th className="px-3 py-2 font-semibold text-muted-foreground">Valor antigo</th>
+                  <th className="px-3 py-2 font-semibold text-muted-foreground">Valor novo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {auditoria.data.map((a) => (
+                  <tr key={a.id} className="border-b border-border/60 last:border-0 align-top">
+                    <td className="whitespace-nowrap py-2.5 pr-3 text-muted-foreground tabular-nums">
+                      {new Date(a.criadoEm).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}
+                    </td>
+                    <td className="px-3 py-2.5 font-medium">{a.usuario ?? "sistema"}</td>
+                    <td className="px-3 py-2.5">
+                      <span className="inline-flex items-center gap-1.5">
+                        {a.tabela === "lojas_periodos" ? <ShieldCheck className="h-3.5 w-3.5 text-navy" /> : <ShieldAlert className="h-3.5 w-3.5 text-[#8a5d00]" />}
+                        <span className="font-semibold text-navy">{a.registro}</span>
+                      </span>
+                    </td>
+                    <td className="max-w-48 truncate px-3 py-2.5 text-muted-foreground" title={a.valorAntigo ?? undefined}>
+                      {a.valorAntigo ?? "—"}
+                    </td>
+                    <td className="max-w-48 truncate px-3 py-2.5 font-medium text-foreground" title={a.valorNovo ?? undefined}>
+                      {a.valorNovo ?? "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="py-8 text-center text-sm text-muted-foreground">Nenhuma alteração registrada ainda.</p>
+        )}
+      </Panel>
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------------------------
+ * Aba: Backup do sistema (snapshot completo no servidor + download)
+ * --------------------------------------------------------------------------*/
+function AbaBackup({
+  backups,
+  backupsLoading,
+  criarBackup,
+  criandoBackup,
+}: {
+  backups?: { id: number; criadoEm: Date; usuario: string | null; tipo: string; storageKey: string; descricao: string | null; registrosLojas: number; registrosRanking: number }[];
+  backupsLoading: boolean;
+  criarBackup: () => void;
+  criandoBackup: boolean;
+}) {
+  return (
+    <div className="mt-6">
+      <Panel
+        titulo="Backup do sistema"
+        subtitulo="Gera um snapshot completo do banco (lojas, metas, rankings e auditoria) e guarda a cópia no storage da nuvem, separado do banco de dados."
+      >
+        <div className="grid gap-6 lg:grid-cols-3">
+          <div className="rounded-lg border bg-muted/40 p-4">
+            <div className="kpi-label">O que é salvo</div>
+            <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+              <li>· Vendas e metas de todas as lojas por período</li>
+              <li>· Rankings de vendedores de todas as lojas</li>
+              <li>· Histórico completo de auditoria</li>
+              <li>· Data/hora e responsável pela geração</li>
+            </ul>
+            <Button
+              className="mt-4 w-full"
+              disabled={criandoBackup}
+              onClick={criarBackup}
+            >
+              <Archive className="mr-1.5 h-4 w-4" />
+              {criandoBackup ? "Gerando backup…" : "Fazer backup agora"}
+            </Button>
+            <p className="mt-2 text-xs text-muted-foreground">
+              O arquivo JSON é baixado automaticamente e também fica guardado na nuvem.
+            </p>
+          </div>
+          <div className="lg:col-span-2">
+            <div className="mb-3 flex items-center gap-2">
+              <History className="h-4 w-4 text-muted-foreground" />
+              <span className="kpi-label">Backups registrados</span>
+            </div>
+            {backupsLoading ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">Carregando…</p>
+            ) : backups && backups.length > 0 ? (
+              <div className="overflow-x-auto rounded-md border border-border">
+                <table className="w-full text-xs sm:text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left">
+                      <th className="py-2 pr-3 font-semibold text-muted-foreground">Gerado em</th>
+                      <th className="px-3 py-2 font-semibold text-muted-foreground">Responsável</th>
+                      <th className="px-3 py-2 text-right font-semibold text-muted-foreground">Lojas</th>
+                      <th className="px-3 py-2 text-right font-semibold text-muted-foreground">Vendedores</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {backups.map((b) => (
+                      <tr key={b.id} className="border-b border-border/60 last:border-0">
+                        <td className="whitespace-nowrap py-2 pr-3 tabular-nums">
+                          {new Date(b.criadoEm).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}
+                        </td>
+                        <td className="px-3 py-2">{b.usuario ?? "sistema"}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{b.registrosLojas}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{b.registrosRanking}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="rounded-md border border-border py-6 text-center text-sm text-muted-foreground">
+                Nenhum backup registrado ainda. Clique em "Fazer backup agora" para gerar o primeiro.
+              </p>
+            )}
+          </div>
+        </div>
+      </Panel>
+    </div>
+  );
+}
 
 export default function Admin() {
   const store = useDataStore();
   const [aba, setAba] = useState<Aba>("lojas");
+  const utils = trpc.useUtils();
+  const auditoria = trpc.bi.listarAuditoria.useQuery({ limit: 200 });
+  const backups = trpc.bi.listarBackups.useQuery();
+  const criarBackup = trpc.bi.criarBackup.useMutation({
+    onSuccess: (res) => {
+      utils.bi.listarBackups.invalidate();
+      // Abre o arquivo do backup para download direto do storage
+      const a = document.createElement("a");
+      a.href = res.url;
+      a.download = res.storageKey.split("/").pop() ?? "backup.json";
+      a.click();
+      toast.success(`Backup do sistema gerado e baixado (${res.registrosLojas} lojas, ${res.registrosRanking} vendedores).`);
+    },
+    onError: (e) => toast.error(`Falha ao gerar backup: ${e.message}`),
+  });
   const [periodoAtivo, setPeriodoAtivo] = useState(() => store.periodosDisponiveis()[0]);
   const [novoPeriodo, setNovoPeriodo] = useState("");
   const [lojaSelecionada, setLojaSelecionada] = useState<string>(
@@ -276,6 +434,8 @@ export default function Admin() {
               ["lojas", "Lojas por período"],
               ["vendedores", "Ranking de vendedores"],
               ["importar", "Importar relatório"],
+              ["auditoria", "Histórico de auditoria"],
+              ["backup", "Backup do sistema"],
             ] as const
           ).map(([id, label]) => (
             <button
@@ -656,6 +816,17 @@ Top 8 garçons:
               </Panel>
             </div>
           </div>
+        )}
+
+        {aba === "auditoria" && <AbaAuditoria />}
+
+        {aba === "backup" && (
+          <AbaBackup
+            backups={backups.data}
+            backupsLoading={backups.isLoading}
+            criarBackup={() => criarBackup.mutate()}
+            criandoBackup={criarBackup.isPending}
+          />
         )}
 
         {/* Aviso de persistência */}

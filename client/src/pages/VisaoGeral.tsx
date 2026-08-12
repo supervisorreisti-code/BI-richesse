@@ -4,7 +4,9 @@
  * status e data bars, gráfico de barras de atingimento e colunas vendas vs meta.
  * Dados vivos via DataStore (usuário pode editar via Admin).
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import { Link2, Lightbulb, TrendingDown, TrendingUp } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -20,15 +22,49 @@ import {
   LabelList,
 } from "recharts";
 import { Header, FiltrosDashboard, KpiCard, StatusChip, DataBar, Panel, fmtPct, corStatus } from "@/components/bi/shared";
+import { Button } from "@/components/ui/button";
 import EvolucaoLojas from "@/components/bi/EvolucaoLojas";
 import ModalApresentacao, { BotaoApresentar } from "@/components/bi/ModalApresentacao";
 import { Filtros, fmtMoeda } from "@/lib/data";
 import { useDataStore, usePeriodosDisponiveis } from "@/lib/dataStore";
 import { useFiltrar } from "@/lib/useFiltrar";
+import { trpc } from "@/lib/trpc";
 
 export default function VisaoGeral() {
-  const [filtros, setFiltros] = useState<Filtros>({ periodo: "Maio" });
+  // Link compartilhável: abre o painel já filtrado via ?periodo=Julho&loja=Richesse+Marista
+  const [filtros, setFiltros] = useState<Filtros>(() => {
+    const p = new URLSearchParams(window.location.search);
+    return { periodo: p.get("periodo") ?? "Maio", loja: p.get("loja") ?? undefined };
+  });
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("periodo") || p.get("loja")) {
+      p.delete("periodo");
+      p.delete("loja");
+      const novaUrl = `${window.location.pathname}${p.toString() ? `?${p.toString()}` : ""}${window.location.hash}`;
+      window.history.replaceState(null, "", novaUrl);
+    }
+  }, []);
   const [apresentar, setApresentar] = useState(false);
+  const utils = trpc.useUtils();
+
+  // Compartilhar: gera URL filtrada e copia para o clipboard
+  const [compartilhando, setCompartilhando] = useState(false);
+  function handleCompartilhar() {
+    const base = `${window.location.origin}${window.location.pathname}`;
+    const p = new URLSearchParams();
+    p.set("periodo", filtrosValidos.periodo ?? "");
+    if (filtrosValidos.loja) p.set("loja", filtrosValidos.loja);
+    const url = `${base}?${p.toString()}`;
+    navigator.clipboard
+      .writeText(url)
+      .then(() => {
+        toast.success("Link copiado! Ele abre o painel já filtrado neste período.");
+        setCompartilhando(true);
+        setTimeout(() => setCompartilhando(false), 2000);
+      })
+      .catch(() => toast.error("Não foi possível copiar o link."));
+  }
 
   const store = useDataStore();
   const periodosVivos = usePeriodosDisponiveis();
@@ -45,6 +81,55 @@ export default function VisaoGeral() {
   const lojasVivas = store.lojasDoPeriodo(filtrosValidos.periodo ?? "");
 
   const { registros, vendas, meta, ating, dif } = useFiltrar(filtrosValidos);
+
+  // --- Insights automáticos (gerados a partir dos dados reais) ---
+  const insights = useMemo(() => {
+    const out: { tipo: "bom" | "atencao" | "neutro"; texto: string }[] = [];
+    // 1. Loja mais próxima da meta (com vendas > 0) no período ativo
+    const comVendas = registros.filter((r) => r.vendas_total > 0);
+    if (comVendas.length > 0) {
+      const melhor = [...comVendas].sort((a, b) => b.atingimento_percentual - a.atingimento_percentual)[0];
+      const pior = [...comVendas].sort((a, b) => a.atingimento_percentual - b.atingimento_percentual)[0];
+      if (melhor.atingimento_percentual >= 1) {
+        out.push({ tipo: "bom", texto: `${melhor.loja} já atingiu a meta com ${fmtPct(melhor.atingimento_percentual)} — acima da meta por ${fmtMoeda(melhor.diferenca_meta)}.` });
+      } else {
+        out.push({ tipo: "atencao", texto: `${melhor.loja} é a loja mais próxima da meta (${fmtPct(melhor.atingimento_percentual)}). Falta ${fmtMoeda(melhor.diferenca_meta * -1)}.` });
+      }
+      out.push({ tipo: "atencao", texto: `${pior.loja} tem o menor atingimento (${fmtPct(pior.atingimento_percentual)}).` });
+    }
+    // 2. Maior queda de vendas vs período anterior (por loja)
+    const regPorPeriodo = store.lojasPeriodos;
+    const periodosOrdenados = Array.from(new Set(regPorPeriodo.map((r) => r.periodo)));
+    if (periodosOrdenados.length >= 2) {
+      const atual: string = filtrosValidos.periodo ?? "";
+      const idx = periodosOrdenados.indexOf(atual);
+      if (idx > 0) {
+        const anterior = periodosOrdenados[idx - 1];
+        let maiorQueda: { loja: string; pct: number; abs: number } | null = null;
+        for (const r of regPorPeriodo.filter((x) => x.periodo === atual)) {
+          const ant = regPorPeriodo.find((x) => x.loja === r.loja && x.periodo === anterior);
+          if (ant && ant.vendas_total > 0) {
+            const pct = (r.vendas_total - ant.vendas_total) / ant.vendas_total;
+            if (maiorQueda === null || pct < maiorQueda.pct) {
+              maiorQueda = { loja: r.loja, pct, abs: r.vendas_total - ant.vendas_total };
+            }
+          }
+        }
+        if (maiorQueda && maiorQueda.pct < 0) {
+          out.push({ tipo: "atencao", texto: `${maiorQueda.loja} teve a maior queda vs ${anterior}: ${fmtPct(maiorQueda.pct)} (${fmtMoeda(maiorQueda.abs)}).` });
+        } else if (maiorQueda && maiorQueda.pct > 0) {
+          out.push({ tipo: "bom", texto: `${maiorQueda.loja} teve o maior crescimento vs ${anterior}: ${fmtPct(maiorQueda.pct)} (${fmtMoeda(maiorQueda.abs)}).` });
+        }
+      }
+    }
+    // 3. Vendedor nº 1 geral (maior venda individual de todas as lojas no período)
+    const rankingsAtivos = store.rankingVendedores.filter((r) => r.periodo === filtrosValidos.periodo);
+    if (rankingsAtivos.length > 0) {
+      const topGeral = [...rankingsAtivos].sort((a, b) => b.vendas - a.vendas)[0];
+      out.push({ tipo: "neutro", texto: `Maior venda individual do período: ${topGeral.vendedor} (${topGeral.loja}), com ${fmtMoeda(topGeral.vendas)}.` });
+    }
+    return out.slice(0, 4);
+  }, [registros, filtrosValidos.periodo, store.lojasPeriodos, store.rankingVendedores]);
 
   const periodos = Array.from(new Set(registros.map((r) => r.periodo)));
   const tituloPeriodo = periodos.length === 1 ? periodos[0] : periodos.join(" · ");
@@ -138,6 +223,17 @@ const CORES_LINHA = ["#17365D", "#C62828", "#F9A825", "#2E7D32", "#6A1B9A", "#00
               Desempenho individual das lojas · vendas, metas e atingimento
             </p>
           </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCompartilhar}
+              className={compartilhando ? "text-success" : undefined}
+            >
+              <Link2 className="mr-1.5 h-4 w-4" />
+              {compartilhando ? "Link copiado!" : "Compartilhar período"}
+            </Button>
+          </div>
           <div className="w-full sm:w-auto">
             <FiltrosDashboard
               filtros={filtrosValidos}
@@ -148,6 +244,27 @@ const CORES_LINHA = ["#17365D", "#C62828", "#F9A825", "#2E7D32", "#6A1B9A", "#00
             />
           </div>
         </div>
+
+        {/* Insights automáticos — gerados dos dados reais */}
+        {insights.length > 0 && (
+          <div className="mb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {insights.map((ins, i) => (
+              <div
+                key={i}
+                className="flex items-start gap-2.5 rounded-lg border bg-card p-3 text-sm shadow-sm"
+              >
+                {ins.tipo === "bom" ? (
+                  <TrendingUp className="mt-0.5 h-4 w-4 shrink-0 text-success" />
+                ) : ins.tipo === "atencao" ? (
+                  <TrendingDown className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                ) : (
+                  <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-navy" />
+                )}
+                <span className="text-muted-foreground">{ins.texto}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Cartões KPI */}
         <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
