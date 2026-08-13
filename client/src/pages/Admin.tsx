@@ -5,7 +5,7 @@
  * com o navegador mantendo um cache local. Atingimento e diferença são recalculados
  * automaticamente.
  */
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { Download, FileJson, Plus, RotateCcw, Save, ShieldCheck, ShieldAlert, Trash2, Upload, Archive, History } from "lucide-react";
@@ -28,6 +28,7 @@ import { extrairRelatorio, extrairParaRegistros, RelatorioExtraido } from "@/lib
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAuth } from "@/_core/hooks/useAuth";
 
 function ResumoCard({
   label,
@@ -199,6 +200,14 @@ function AbaBackup({
 }
 
 export default function Admin() {
+  // A versão externa deve iniciar protegida mesmo se a variável pública não
+  // tiver sido gravada no primeiro deploy. Somente o modo Manus explícito
+  // desativa essa guarda no ambiente integrado.
+  const externalAuth = import.meta.env.VITE_AUTH_MODE !== "manus";
+  const { user, loading } = useAuth({
+    redirectOnUnauthenticated: externalAuth,
+    redirectPath: "/login",
+  });
   const store = useDataStore();
   const [aba, setAba] = useState<Aba>("lojas");
   const utils = trpc.useUtils();
@@ -244,12 +253,22 @@ export default function Admin() {
   );
 
   // Ajustar loja selecionada quando mudar de período
-  useMemo(() => {
+  useEffect(() => {
     if (!lojasDoPeriodo.includes(lojaSelecionada)) {
       setLojaSelecionada(lojasDoPeriodo[0] ?? LOJAS_PADRAO[0]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodoAtivo]);
+
+  const hasExternalAdminSession = user?.openId.startsWith("external-admin:") === true;
+
+  if (externalAuth && (loading || !hasExternalAdminSession)) {
+    return (
+      <main className="min-h-screen bg-background flex items-center justify-center p-6">
+        <p className="text-sm text-muted-foreground">Verificando o acesso administrativo…</p>
+      </main>
+    );
+  }
 
   function atualizarRegistro(loja: string, campo: "vendas_total" | "meta", texto: string) {
     const n = parseMoeda(texto);

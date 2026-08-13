@@ -36,7 +36,13 @@ function externalAdminUser(email: string): User {
 }
 
 export function isExternalAuthEnabled() {
-  return process.env.AUTH_MODE === "external";
+  // Em produção na Vercel, usar a autenticação local do BI por padrão impede
+  // que um token legado do ambiente anterior possa liberar o painel Admin.
+  // AUTH_MODE=manus continua permitindo o modo integrado apenas quando
+  // solicitado de forma explícita.
+  return process.env.AUTH_MODE === "external" || (
+    process.env.VERCEL === "1" && process.env.AUTH_MODE !== "manus"
+  );
 }
 
 export async function authenticateExternalLogin(email: string, password: string): Promise<User | null> {
