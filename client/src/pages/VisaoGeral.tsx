@@ -289,7 +289,7 @@ const CORES_LINHA = ["#17365D", "#C62828", "#F9A825", "#2E7D32", "#6A1B9A", "#00
         {/* Evolução mensal por loja — seção destacada */}
         <Panel
           titulo="Evolução mensal por loja"
-          subtitulo={`Atingimento e vendas mês a mês · deltas em pontos percentuais vs o mês anterior`}
+          subtitulo={`Atingimento e vendas mês a mês`}
           className="mb-6"
           acaoDireita={<BotaoApresentar onClick={() => setApresentar(true)} />}
         >
@@ -301,7 +301,7 @@ const CORES_LINHA = ["#17365D", "#C62828", "#F9A825", "#2E7D32", "#6A1B9A", "#00
           aberto={apresentar}
           onFechar={() => setApresentar(false)}
           titulo="Evolução mensal por loja"
-          subtitulo="Atingimento e vendas mês a mês · deltas em pontos percentuais vs o mês anterior"
+          subtitulo="Atingimento e vendas mês a mês"
         >
           <EvolucaoLojas lojasFiltro={filtrosValidos.loja} apresentacao />
         </ModalApresentacao>

@@ -177,7 +177,6 @@ export default function EvolucaoLojas({
             {/* Mini-tabela mês a mês com deltas */}
             <div className={`space-y-1.5 ${apresentacao ? "text-lg" : "text-xs"}`}>
               {c.regs.map((r, i) => {
-                const delta = i === 0 ? null : deltaEntreMeses(store.lojasPeriodos, c.loja, r.periodo, c.regs[i - 1].periodo);
                 return (
                   <div
                     key={r.periodo}
@@ -205,7 +204,6 @@ export default function EvolucaoLojas({
                     <span className={`ml-auto shrink-0 text-right tabular-nums font-semibold ${apresentacao ? "text-white" : ""}`}>
                       {r.temDados ? fmtPct(r.ating) : "—"}
                     </span>
-                    <span className={`ml-2 shrink-0 text-right ${apresentacao ? "text-base" : ""}`}> <SetaDelta delta={delta} grande={apresentacao} /></span>
                   </div>
                 );
               })}

@@ -10,6 +10,7 @@ import DetalheLoja from "./pages/DetalheLoja";
 import Home from "./pages/Home";
 import ResumoExecutivo from "./pages/ResumoExecutivo";
 import Admin from "./pages/Admin";
+import Login from "./pages/Login";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
@@ -19,6 +20,7 @@ function Router() {
       <Route path={"/resumo"} component={ResumoExecutivo} />
       <Route path={"/loja"} component={DetalheLoja} />
       <Route path={"/admin"} component={Admin} />
+      <Route path={"/login"} component={Login} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />

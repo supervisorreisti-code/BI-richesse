@@ -1,5 +1,6 @@
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
+import { authenticateExternalLogin, isExternalAuthEnabled, issueExternalSession } from "./_core/externalAuth";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, publicProcedure, router } from "./_core/trpc";
 import { z } from "zod";
@@ -10,6 +11,15 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
+    loginExternal: publicProcedure
+      .input(z.object({ email: z.string().email(), password: z.string().min(1).max(256) }))
+      .mutation(async ({ input, ctx }) => {
+        if (!isExternalAuthEnabled()) throw new Error("Login externo não está habilitado neste ambiente.");
+        const user = await authenticateExternalLogin(input.email, input.password);
+        if (!user) throw new Error("Credenciais inválidas.");
+        await issueExternalSession(ctx.req, ctx.res, user);
+        return { success: true } as const;
+      }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });

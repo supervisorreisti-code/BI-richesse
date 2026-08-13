@@ -2,6 +2,7 @@
 // Uploads via Forge Server presigned URL to S3 (PUT direct).
 // Downloads return /manus-storage/{key} paths served via 307 redirect.
 
+import { issueSignedToken, presignUrl, put } from "@vercel/blob";
 import { ENV } from "./_core/env";
 
 function getForgeConfig() {
@@ -28,13 +29,34 @@ function appendHashSuffix(relKey: string): string {
   return `${relKey.slice(0, lastDot)}_${hash}${relKey.slice(lastDot)}`;
 }
 
+function isVercelBlobStorage() {
+  return process.env.STORAGE_MODE === "vercel-blob";
+}
+
+function getVercelBlobToken() {
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) throw new Error("BLOB_READ_WRITE_TOKEN não configurado para o armazenamento externo.");
+  return token;
+}
+
 export async function storagePut(
   relKey: string,
   data: Buffer | Uint8Array | string,
   contentType = "application/octet-stream",
 ): Promise<{ key: string; url: string }> {
-  const { forgeUrl, forgeKey } = getForgeConfig();
   const key = appendHashSuffix(normalizeKey(relKey));
+  if (isVercelBlobStorage()) {
+    const body = data instanceof Uint8Array && !Buffer.isBuffer(data) ? Buffer.from(data) : data;
+    const blob = await put(key, body, {
+      access: "private",
+      addRandomSuffix: false,
+      contentType,
+      token: getVercelBlobToken(),
+    });
+    return { key, url: blob.url };
+  }
+
+  const { forgeUrl, forgeKey } = getForgeConfig();
 
   // 1. Get presigned PUT URL from Forge
   const presignUrl = new URL("v1/storage/presign/put", forgeUrl + "/");
@@ -73,10 +95,29 @@ export async function storagePut(
 
 export async function storageGet(relKey: string): Promise<{ key: string; url: string }> {
   const key = normalizeKey(relKey);
+  if (isVercelBlobStorage()) return { key, url: await storageGetSignedUrl(key) };
   return { key, url: `/manus-storage/${key}` };
 }
 
 export async function storageGetSignedUrl(relKey: string): Promise<string> {
+  if (isVercelBlobStorage()) {
+    const key = normalizeKey(relKey);
+    const validUntil = Date.now() + 10 * 60 * 1000;
+    const signedToken = await issueSignedToken({
+      pathname: key,
+      operations: ["get"],
+      validUntil,
+      token: getVercelBlobToken(),
+    });
+    const { presignedUrl } = await presignUrl(signedToken, {
+      operation: "get",
+      pathname: key,
+      access: "private",
+      validUntil,
+      useCache: false,
+    });
+    return presignedUrl;
+  }
   const { forgeUrl, forgeKey } = getForgeConfig();
   const key = normalizeKey(relKey);
 
