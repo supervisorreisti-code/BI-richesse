@@ -133,6 +133,7 @@ O componente EvolucaoLojas.tsx (client/src/components/bi/EvolucaoLojas.tsx) já 
 # Fase atual: migração completa para Vercel confirmada pelo usuário
 
 - [ ] Confirmar a conta Vercel conectada ao GitHub e criar o projeto externo a partir da branch main.
+- [x] Enviar a versão adaptada para o GitHub (commit `303f753` na branch `main`).
 - [x] Criar um cluster TiDB Cloud externo, aplicar o schema MySQL e migrar lojas, rankings, usuários, auditoria e metadados de backup (origem 0 → externo 0).
 - [x] Criar banco de aplicação dedicado `richesse_bi` e aplicar o schema completo no TiDB Cloud.
 - [x] Restaurar os 25 registros oficiais de lojas e 173 rankings da fonte versionada, excluindo os dados de teste de agosto (validação: 25 lojas, 173 rankings, 1 usuário, 26 auditorias).
@@ -141,6 +142,7 @@ O componente EvolucaoLojas.tsx (client/src/components/bi/EvolucaoLojas.tsx) já 
 - [x] Validar a conexão TLS ao TiDB Cloud externo com teste automatizado (`EXTERNAL_DATABASE_URL`).
 - [x] Corrigir o destino da migração para o banco dedicado `richesse_bi` (o schema `sys` do TiDB é restrito a metadados do sistema).
 - [x] Adaptar o backend Express/tRPC para Vercel Functions, sem listener de porta e sem o runtime específico da hospedagem atual.
+- [x] Configurar conexão TLS explícita no `db.ts` para o endpoint público do TiDB Cloud em produção.
 - [x] Substituir Manus OAuth por autenticação externa de administrador e proteger a área de Administração.
 - [x] Criar login externo com sessão JWT de 12 horas, credenciais administrativas em variáveis de ambiente e rota `/login`.
 - [x] Criar função serverless `api/[...path].ts`, configuração `vercel.json` e contrato de variáveis em `.env.vercel.example`.

@@ -1,15 +1,36 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
+import type { MySql2Database } from "drizzle-orm/mysql2";
+import { createPool } from "mysql2/promise";
 import { InsertUser, users } from "../drizzle/schema";
+import * as schema from "../drizzle/schema";
 import { ENV } from './_core/env';
 
-let _db: ReturnType<typeof drizzle> | null = null;
+let _db: MySql2Database<typeof schema> | null = null;
+let _pool: ReturnType<typeof createPool> | null = null;
+
+function databaseConnectionOptions(databaseUrl: string) {
+  const url = new URL(databaseUrl);
+  const isTiDBCloud = url.hostname.endsWith("tidbcloud.com");
+  return {
+    host: url.hostname,
+    port: Number(url.port || (isTiDBCloud ? 4000 : 3306)),
+    user: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+    database: decodeURIComponent(url.pathname.replace(/^\//, "")),
+    waitForConnections: true,
+    connectionLimit: 5,
+    enableKeepAlive: true,
+    ssl: isTiDBCloud ? { rejectUnauthorized: true } : undefined,
+  };
+}
 
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      _pool = createPool(databaseConnectionOptions(process.env.DATABASE_URL));
+      _db = drizzle(_pool, { schema, mode: "default" });
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
