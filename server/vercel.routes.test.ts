@@ -10,6 +10,7 @@ describe("publicação da Vercel", () => {
     const scripts = JSON.parse(readFileSync(resolve(projectRoot, "package.json"), "utf8")).scripts;
 
     expect(existsSync(resolve(projectRoot, "server", "vercel-trpc.ts"))).toBe(true);
+    expect(existsSync(resolve(projectRoot, "api", "trpc", "[...path].js"))).toBe(true);
     expect(scripts["build:vercel"]).toContain("server/vercel-trpc.ts");
     expect(scripts["build:vercel"]).toContain("api/trpc/[...path].js");
     expect(config.functions?.["api/trpc/[...path].js"]?.maxDuration).toBe(30);
