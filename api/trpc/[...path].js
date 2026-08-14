@@ -429,6 +429,7 @@ var init_db = __esm({
 // server/storage.ts
 var storage_exports = {};
 __export(storage_exports, {
+  isVercelBlobStorage: () => isVercelBlobStorage,
   storageGet: () => storageGet,
   storageGetSignedUrl: () => storageGetSignedUrl,
   storagePut: () => storagePut
@@ -454,7 +455,7 @@ function appendHashSuffix(relKey) {
   return `${relKey.slice(0, lastDot)}_${hash}${relKey.slice(lastDot)}`;
 }
 function isVercelBlobStorage() {
-  return process.env.STORAGE_MODE === "vercel-blob";
+  return process.env.STORAGE_MODE === "vercel-blob" || Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 }
 function getVercelBlobToken() {
   const token = process.env.BLOB_READ_WRITE_TOKEN;

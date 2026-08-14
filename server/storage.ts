@@ -29,8 +29,11 @@ function appendHashSuffix(relKey: string): string {
   return `${relKey.slice(0, lastDot)}_${hash}${relKey.slice(lastDot)}`;
 }
 
-function isVercelBlobStorage() {
-  return process.env.STORAGE_MODE === "vercel-blob";
+export function isVercelBlobStorage() {
+  // A conexão de uma Blob Store cria BLOB_READ_WRITE_TOKEN na Vercel. Usar o
+  // token como sinal também evita que um valor ausente ou digitado de forma
+  // incorreta em STORAGE_MODE faça o backup cair no armazenamento Manus.
+  return process.env.STORAGE_MODE === "vercel-blob" || Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 }
 
 function getVercelBlobToken() {
