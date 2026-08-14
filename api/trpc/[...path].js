@@ -8,6 +8,33 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
+// shared/const.ts
+var COOKIE_NAME, ONE_YEAR_MS, AXIOS_TIMEOUT_MS, UNAUTHED_ERR_MSG, NOT_ADMIN_ERR_MSG, decodeOAuthState;
+var init_const = __esm({
+  "shared/const.ts"() {
+    "use strict";
+    COOKIE_NAME = "app_session_id";
+    ONE_YEAR_MS = 1e3 * 60 * 60 * 24 * 365;
+    AXIOS_TIMEOUT_MS = 3e4;
+    UNAUTHED_ERR_MSG = "Please login (10001)";
+    NOT_ADMIN_ERR_MSG = "You do not have required permission (10002)";
+    decodeOAuthState = (state) => {
+      let decoded;
+      try {
+        decoded = atob(state);
+      } catch {
+        return { redirectUri: "" };
+      }
+      try {
+        const parsed = JSON.parse(decoded);
+        if (parsed && typeof parsed.redirectUri === "string") return parsed;
+      } catch {
+      }
+      return { redirectUri: decoded };
+    };
+  }
+});
+
 // server/_core/env.ts
 var ENV;
 var init_env = __esm({
@@ -23,6 +50,379 @@ var init_env = __esm({
       forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
       forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? ""
     };
+  }
+});
+
+// drizzle/schema.ts
+var schema_exports = {};
+__export(schema_exports, {
+  auditLog: () => auditLog,
+  backupSnapshots: () => backupSnapshots,
+  lojasPeriodos: () => lojasPeriodos,
+  rankingVendedores: () => rankingVendedores,
+  users: () => users
+});
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+var users, lojasPeriodos, rankingVendedores, auditLog, backupSnapshots;
+var init_schema = __esm({
+  "drizzle/schema.ts"() {
+    "use strict";
+    users = mysqlTable("users", {
+      /**
+       * Surrogate primary key. Auto-incremented numeric value managed by the database.
+       * Use this for relations between tables.
+       */
+      id: int("id").autoincrement().primaryKey(),
+      /** Manus OAuth identifier (openId) returned from the OAuth callback. Unique per user. */
+      openId: varchar("openId", { length: 64 }).notNull().unique(),
+      name: text("name"),
+      email: varchar("email", { length: 320 }),
+      loginMethod: varchar("loginMethod", { length: 64 }),
+      role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+      createdAt: timestamp("createdAt").defaultNow().notNull(),
+      updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+      lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull()
+    });
+    lojasPeriodos = mysqlTable("lojas_periodos", {
+      id: int("id").autoincrement().primaryKey(),
+      periodo: varchar("periodo", { length: 32 }).notNull(),
+      loja: varchar("loja", { length: 128 }).notNull(),
+      vendasTotal: int("vendas_total").notNull(),
+      meta: int("meta").notNull(),
+      updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull()
+    });
+    rankingVendedores = mysqlTable("ranking_vendedores", {
+      id: int("id").autoincrement().primaryKey(),
+      periodo: varchar("periodo", { length: 32 }).notNull(),
+      loja: varchar("loja", { length: 128 }).notNull(),
+      posicao: int("posicao").notNull(),
+      vendedor: varchar("vendedor", { length: 128 }).notNull(),
+      vendas: int("vendas").notNull(),
+      isDeleted: int("is_deleted").default(0).notNull(),
+      updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull()
+    });
+    auditLog = mysqlTable("audit_log", {
+      id: int("id").autoincrement().primaryKey(),
+      usuario: varchar("usuario", { length: 255 }),
+      tabela: varchar("tabela", { length: 64 }).notNull(),
+      registro: varchar("registro", { length: 255 }),
+      campo: varchar("campo", { length: 64 }),
+      valorAntigo: text("valor_antigo"),
+      valorNovo: text("valor_novo"),
+      criadoEm: timestamp("criado_em").defaultNow().notNull()
+    });
+    backupSnapshots = mysqlTable("backup_snapshots", {
+      id: int("id").autoincrement().primaryKey(),
+      criadoEm: timestamp("criado_em").defaultNow().notNull(),
+      usuario: varchar("usuario", { length: 255 }),
+      tipo: varchar("tipo", { length: 32 }).default("manual").notNull(),
+      /** Chave do arquivo JSON no storage (/manus-storage/...) */
+      storageKey: varchar("storage_key", { length: 255 }).notNull(),
+      descricao: varchar("descricao", { length: 255 }),
+      registrosLojas: int("registros_lojas").notNull().default(0),
+      registrosRanking: int("registros_ranking").notNull().default(0)
+    });
+  }
+});
+
+// server/db.ts
+import { and, asc, desc, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/mysql2";
+import { createPool } from "mysql2/promise";
+function databaseConnectionOptions(databaseUrl) {
+  const url = new URL(databaseUrl);
+  const isTiDBCloud = url.hostname.endsWith("tidbcloud.com");
+  return {
+    host: url.hostname,
+    port: Number(url.port || (isTiDBCloud ? 4e3 : 3306)),
+    user: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+    database: decodeURIComponent(url.pathname.replace(/^\//, "")),
+    waitForConnections: true,
+    connectionLimit: 5,
+    enableKeepAlive: true,
+    ssl: isTiDBCloud ? { rejectUnauthorized: true } : void 0
+  };
+}
+async function getDb() {
+  if (!_db && process.env.DATABASE_URL) {
+    try {
+      _pool = createPool(databaseConnectionOptions(process.env.DATABASE_URL));
+      _db = drizzle(_pool, { schema: schema_exports, mode: "default" });
+    } catch (error) {
+      console.warn("[Database] Failed to connect:", error);
+      _db = null;
+    }
+  }
+  return _db;
+}
+async function upsertUser(user) {
+  if (!user.openId) {
+    throw new Error("User openId is required for upsert");
+  }
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot upsert user: database not available");
+    return;
+  }
+  try {
+    const values = {
+      openId: user.openId
+    };
+    const updateSet = {};
+    const textFields = ["name", "email", "loginMethod"];
+    const assignNullable = (field) => {
+      const value = user[field];
+      if (value === void 0) return;
+      const normalized = value ?? null;
+      values[field] = normalized;
+      updateSet[field] = normalized;
+    };
+    textFields.forEach(assignNullable);
+    if (user.lastSignedIn !== void 0) {
+      values.lastSignedIn = user.lastSignedIn;
+      updateSet.lastSignedIn = user.lastSignedIn;
+    }
+    if (user.role !== void 0) {
+      values.role = user.role;
+      updateSet.role = user.role;
+    } else if (user.openId === ENV.ownerOpenId) {
+      values.role = "admin";
+      updateSet.role = "admin";
+    }
+    if (!values.lastSignedIn) {
+      values.lastSignedIn = /* @__PURE__ */ new Date();
+    }
+    if (Object.keys(updateSet).length === 0) {
+      updateSet.lastSignedIn = /* @__PURE__ */ new Date();
+    }
+    await db.insert(users).values(values).onDuplicateKeyUpdate({
+      set: updateSet
+    });
+  } catch (error) {
+    console.error("[Database] Failed to upsert user:", error);
+    throw error;
+  }
+}
+async function getUserByOpenId(openId) {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot get user: database not available");
+    return void 0;
+  }
+  const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
+  return result.length > 0 ? result[0] : void 0;
+}
+function requireDb(db) {
+  if (!db) throw new Error("Database not available");
+  return db;
+}
+async function listLojasPeriodos() {
+  const db = requireDb(await getDb());
+  return db.select().from(lojasPeriodos).orderBy(asc(lojasPeriodos.periodo), asc(lojasPeriodos.loja));
+}
+async function listRankings() {
+  const db = requireDb(await getDb());
+  return db.select().from(rankingVendedores).where(eq(rankingVendedores.isDeleted, 0)).orderBy(asc(rankingVendedores.periodo), asc(rankingVendedores.loja), asc(rankingVendedores.posicao));
+}
+async function salvarLojaPeriodo(periodo, loja, vendasTotal, meta, usuario) {
+  const db = requireDb(await getDb());
+  const existing = await db.select().from(lojasPeriodos).where(and(eq(lojasPeriodos.periodo, periodo), eq(lojasPeriodos.loja, loja))).limit(1);
+  if (existing.length > 0) {
+    const antes = existing[0];
+    if (antes.vendasTotal !== vendasTotal || antes.meta !== meta) {
+      await db.insert(auditLog).values({
+        usuario: usuario ?? null,
+        tabela: "lojas_periodos",
+        registro: `${periodo}|${loja}`,
+        campo: "vendas_total,meta",
+        valorAntigo: `${antes.vendasTotal},${antes.meta}`,
+        valorNovo: `${vendasTotal},${meta}`
+      });
+    }
+    await db.update(lojasPeriodos).set({ vendasTotal, meta }).where(and(eq(lojasPeriodos.periodo, periodo), eq(lojasPeriodos.loja, loja)));
+  } else {
+    await db.insert(lojasPeriodos).values({ periodo, loja, vendasTotal, meta });
+    await db.insert(auditLog).values({
+      usuario: usuario ?? null,
+      tabela: "lojas_periodos",
+      registro: `${periodo}|${loja}`,
+      campo: "vendas_total,meta",
+      valorAntigo: null,
+      valorNovo: `${vendasTotal},${meta}`
+    });
+  }
+}
+async function adicionarPeriodo(periodo, usuario) {
+  const db = requireDb(await getDb());
+  await db.insert(auditLog).values({
+    usuario: usuario ?? null,
+    tabela: "lojas_periodos",
+    registro: periodo,
+    campo: "periodo",
+    valorAntigo: null,
+    valorNovo: "criado (lojas com valores zerados)"
+  });
+  return db.insert(lojasPeriodos).values({ periodo, loja: "__periodo__", vendasTotal: 0, meta: 0 });
+}
+async function substituirRanking(periodo, loja, vendedores, usuario) {
+  const db = requireDb(await getDb());
+  const existing = await db.select().from(rankingVendedores).where(and(eq(rankingVendedores.periodo, periodo), eq(rankingVendedores.loja, loja), eq(rankingVendedores.isDeleted, 0)));
+  for (const r of existing) {
+    await db.update(rankingVendedores).set({ isDeleted: 1 }).where(eq(rankingVendedores.id, r.id));
+  }
+  for (let i = 0; i < vendedores.length; i++) {
+    await db.insert(rankingVendedores).values({
+      periodo,
+      loja,
+      posicao: i + 1,
+      vendedor: vendedores[i].vendedor,
+      vendas: Math.round(vendedores[i].vendas * 100) / 100,
+      isDeleted: 0
+    });
+  }
+  await db.insert(auditLog).values({
+    usuario: usuario ?? null,
+    tabela: "ranking_vendedores",
+    registro: `${periodo}|${loja}`,
+    campo: "ranking completo",
+    valorAntigo: existing.length > 0 ? `${existing.length} registro(s)` : null,
+    valorNovo: `${vendedores.length} registro(s)`
+  });
+}
+async function removerVendedor(id, usuario) {
+  const db = requireDb(await getDb());
+  const rows = await db.select().from(rankingVendedores).where(eq(rankingVendedores.id, id)).limit(1);
+  if (rows.length === 0) return;
+  await db.update(rankingVendedores).set({ isDeleted: 1 }).where(eq(rankingVendedores.id, id));
+  await db.insert(auditLog).values({
+    usuario: usuario ?? null,
+    tabela: "ranking_vendedores",
+    registro: `${rows[0].periodo}|${rows[0].loja}|${rows[0].vendedor}`,
+    campo: "is_deleted",
+    valorAntigo: "0",
+    valorNovo: "1"
+  });
+  const restantes = await db.select().from(rankingVendedores).where(and(eq(rankingVendedores.periodo, rows[0].periodo), eq(rankingVendedores.loja, rows[0].loja), eq(rankingVendedores.isDeleted, 0))).orderBy(asc(rankingVendedores.posicao));
+  for (let i = 0; i < restantes.length; i++) {
+    if (restantes[i].posicao !== i + 1) {
+      await db.update(rankingVendedores).set({ posicao: i + 1 }).where(eq(rankingVendedores.id, restantes[i].id));
+    }
+  }
+}
+async function inserirRankingsEmLote(entradas, usuario) {
+  const db = requireDb(await getDb());
+  for (const e of entradas) {
+    await substituirRanking(e.periodo, e.loja, e.vendedores, usuario);
+  }
+}
+async function removerPeriodoRankings(periodo, usuario) {
+  const db = requireDb(await getDb());
+  const rows = await db.select().from(rankingVendedores).where(eq(rankingVendedores.periodo, periodo));
+  if (rows.length === 0) return;
+  for (const r of rows) {
+    await db.update(rankingVendedores).set({ isDeleted: 1 }).where(eq(rankingVendedores.id, r.id));
+  }
+  await db.insert(auditLog).values({
+    usuario: usuario ?? null,
+    tabela: "ranking_vendedores",
+    registro: periodo,
+    campo: "is_deleted",
+    valorAntigo: "0",
+    valorNovo: "1"
+  });
+}
+async function removerPeriodoLojas(periodo, usuario) {
+  const db = requireDb(await getDb());
+  await db.delete(lojasPeriodos).where(eq(lojasPeriodos.periodo, periodo));
+  await db.insert(auditLog).values({
+    usuario: usuario ?? null,
+    tabela: "lojas_periodos",
+    registro: periodo,
+    campo: "periodo",
+    valorAntigo: "existia",
+    valorNovo: "removido"
+  });
+}
+async function importarLote(lojas, rankings, usuario) {
+  const db = requireDb(await getDb());
+  const periodosDoLote = Array.from(new Set(lojas.map((l) => l.periodo)));
+  for (const p of periodosDoLote) {
+    await db.delete(rankingVendedores).where(eq(rankingVendedores.periodo, p));
+    await db.delete(lojasPeriodos).where(eq(lojasPeriodos.periodo, p));
+  }
+  for (const l of lojas) {
+    await db.insert(lojasPeriodos).values({
+      periodo: l.periodo,
+      loja: l.loja,
+      vendasTotal: l.vendasTotal,
+      meta: l.meta
+    });
+  }
+  for (const r of rankings) {
+    for (let i = 0; i < r.vendedores.length; i++) {
+      await db.insert(rankingVendedores).values({
+        periodo: r.periodo,
+        loja: r.loja,
+        posicao: i + 1,
+        vendedor: r.vendedores[i].vendedor,
+        vendas: Math.round(r.vendedores[i].vendas * 100) / 100,
+        isDeleted: 0
+      });
+    }
+  }
+  await db.insert(auditLog).values({
+    usuario: usuario ?? null,
+    tabela: "importacao_lote",
+    registro: periodosDoLote.join(","),
+    campo: "lojas,ranking",
+    valorAntigo: null,
+    valorNovo: `${lojas.length} loja(s), ${rankings.reduce((s, r) => s + r.vendedores.length, 0)} vendedor(es)`
+  });
+}
+async function resetarParaOficiais(usuario) {
+  const db = requireDb(await getDb());
+  await db.delete(auditLog).where(eq(auditLog.id, 0));
+  await db.delete(rankingVendedores).where(eq(rankingVendedores.isDeleted, 0));
+  await db.delete(lojasPeriodos);
+  await db.insert(auditLog).values({
+    usuario: usuario ?? null,
+    tabela: "reset_oficial",
+    registro: "todos",
+    campo: "lojas,ranking",
+    valorAntigo: "dados do banco",
+    valorNovo: "dados oficiais embutidos (Maio, Junho, Julho)"
+  });
+}
+async function insereBackup(meta) {
+  const db = requireDb(await getDb());
+  return db.insert(backupSnapshots).values(meta);
+}
+async function listarBackups() {
+  const db = requireDb(await getDb());
+  return db.select().from(backupSnapshots).orderBy(desc(backupSnapshots.criadoEm)).limit(50);
+}
+async function listarAuditoria(limit = 200) {
+  const db = requireDb(await getDb());
+  return db.select().from(auditLog).orderBy(desc(auditLog.criadoEm)).limit(limit);
+}
+async function snapshotCompleto() {
+  const db = requireDb(await getDb());
+  const lojas = await db.select().from(lojasPeriodos).orderBy(asc(lojasPeriodos.periodo), asc(lojasPeriodos.loja));
+  const rankings = await db.select().from(rankingVendedores).where(eq(rankingVendedores.isDeleted, 0)).orderBy(asc(rankingVendedores.periodo), asc(rankingVendedores.loja), asc(rankingVendedores.posicao));
+  const auditoria = await db.select().from(auditLog).orderBy(desc(auditLog.criadoEm));
+  return { geradoEm: (/* @__PURE__ */ new Date()).toISOString(), lojas, rankings, auditoria };
+}
+var _db, _pool;
+var init_db = __esm({
+  "server/db.ts"() {
+    "use strict";
+    init_schema();
+    init_schema();
+    init_env();
+    init_schema();
+    _db = null;
+    _pool = null;
   }
 });
 
@@ -475,30 +875,289 @@ var init_data = __esm({
   }
 });
 
+// shared/_core/errors.ts
+var HttpError, ForbiddenError;
+var init_errors = __esm({
+  "shared/_core/errors.ts"() {
+    "use strict";
+    HttpError = class extends Error {
+      constructor(statusCode, message) {
+        super(message);
+        this.statusCode = statusCode;
+        this.name = "HttpError";
+      }
+    };
+    ForbiddenError = (msg) => new HttpError(403, msg);
+  }
+});
+
+// server/_core/sdk.ts
+var sdk_exports = {};
+__export(sdk_exports, {
+  sdk: () => sdk
+});
+import axios from "axios";
+import { parse as parseCookieHeader2 } from "cookie";
+import { SignJWT as SignJWT2, jwtVerify as jwtVerify2 } from "jose";
+function buildCronUser(userInfo) {
+  const now = /* @__PURE__ */ new Date();
+  return {
+    id: -1,
+    openId: userInfo.openId,
+    name: userInfo.name || "Manus Scheduled Task",
+    email: null,
+    loginMethod: null,
+    role: "user",
+    createdAt: now,
+    updatedAt: now,
+    lastSignedIn: now,
+    taskUid: userInfo.taskUid ?? void 0,
+    isCron: true
+  };
+}
+var isNonEmptyString2, EXCHANGE_TOKEN_PATH, GET_USER_INFO_PATH, GET_USER_INFO_WITH_JWT_PATH, OAuthService, createOAuthHttpClient, SDKServer, CRON_OPEN_ID_PREFIX, sdk;
+var init_sdk = __esm({
+  "server/_core/sdk.ts"() {
+    "use strict";
+    init_const();
+    init_errors();
+    init_db();
+    init_env();
+    isNonEmptyString2 = (value) => typeof value === "string" && value.length > 0;
+    EXCHANGE_TOKEN_PATH = `/webdev.v1.WebDevAuthPublicService/ExchangeToken`;
+    GET_USER_INFO_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfo`;
+    GET_USER_INFO_WITH_JWT_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfoWithJwt`;
+    OAuthService = class {
+      constructor(client) {
+        this.client = client;
+        console.log("[OAuth] Initialized with baseURL:", ENV.oAuthServerUrl);
+        if (!ENV.oAuthServerUrl) {
+          console.error(
+            "[OAuth] ERROR: OAUTH_SERVER_URL is not configured! Set OAUTH_SERVER_URL environment variable."
+          );
+        }
+      }
+      decodeState(state) {
+        return decodeOAuthState(state).redirectUri;
+      }
+      async getTokenByCode(code, state) {
+        const payload = {
+          clientId: ENV.appId,
+          grantType: "authorization_code",
+          code,
+          redirectUri: this.decodeState(state)
+        };
+        const { data } = await this.client.post(
+          EXCHANGE_TOKEN_PATH,
+          payload
+        );
+        return data;
+      }
+      async getUserInfoByToken(token) {
+        const { data } = await this.client.post(
+          GET_USER_INFO_PATH,
+          {
+            accessToken: token.accessToken
+          }
+        );
+        return data;
+      }
+    };
+    createOAuthHttpClient = () => axios.create({
+      baseURL: ENV.oAuthServerUrl,
+      timeout: AXIOS_TIMEOUT_MS
+    });
+    SDKServer = class {
+      client;
+      oauthService;
+      constructor(client = createOAuthHttpClient()) {
+        this.client = client;
+        this.oauthService = new OAuthService(this.client);
+      }
+      deriveLoginMethod(platforms, fallback) {
+        if (fallback && fallback.length > 0) return fallback;
+        if (!Array.isArray(platforms) || platforms.length === 0) return null;
+        const set = new Set(
+          platforms.filter((p) => typeof p === "string")
+        );
+        if (set.has("REGISTERED_PLATFORM_EMAIL")) return "email";
+        if (set.has("REGISTERED_PLATFORM_GOOGLE")) return "google";
+        if (set.has("REGISTERED_PLATFORM_APPLE")) return "apple";
+        if (set.has("REGISTERED_PLATFORM_MICROSOFT") || set.has("REGISTERED_PLATFORM_AZURE"))
+          return "microsoft";
+        if (set.has("REGISTERED_PLATFORM_GITHUB")) return "github";
+        const first = Array.from(set)[0];
+        return first ? first.toLowerCase() : null;
+      }
+      /**
+       * Exchange OAuth authorization code for access token
+       * @example
+       * const tokenResponse = await sdk.exchangeCodeForToken(code, state);
+       */
+      async exchangeCodeForToken(code, state) {
+        return this.oauthService.getTokenByCode(code, state);
+      }
+      /**
+       * Get user information using access token
+       * @example
+       * const userInfo = await sdk.getUserInfo(tokenResponse.accessToken);
+       */
+      async getUserInfo(accessToken) {
+        const data = await this.oauthService.getUserInfoByToken({
+          accessToken
+        });
+        const loginMethod = this.deriveLoginMethod(
+          data?.platforms,
+          data?.platform ?? data.platform ?? null
+        );
+        return {
+          ...data,
+          platform: loginMethod,
+          loginMethod
+        };
+      }
+      parseCookies(cookieHeader) {
+        if (!cookieHeader) {
+          return /* @__PURE__ */ new Map();
+        }
+        const parsed = parseCookieHeader2(cookieHeader);
+        return new Map(Object.entries(parsed));
+      }
+      getSessionSecret() {
+        const secret = ENV.cookieSecret;
+        return new TextEncoder().encode(secret);
+      }
+      /**
+       * Create a session token for a Manus user openId
+       * @example
+       * const sessionToken = await sdk.createSessionToken(userInfo.openId);
+       */
+      async createSessionToken(openId, options = {}) {
+        return this.signSession(
+          {
+            openId,
+            appId: ENV.appId,
+            name: options.name || ""
+          },
+          options
+        );
+      }
+      async signSession(payload, options = {}) {
+        const issuedAt = Date.now();
+        const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
+        const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1e3);
+        const secretKey = this.getSessionSecret();
+        return new SignJWT2({
+          openId: payload.openId,
+          appId: payload.appId,
+          name: payload.name
+        }).setProtectedHeader({ alg: "HS256", typ: "JWT" }).setExpirationTime(expirationSeconds).sign(secretKey);
+      }
+      async verifySession(cookieValue) {
+        if (!cookieValue) {
+          console.warn("[Auth] Missing session cookie");
+          return null;
+        }
+        try {
+          const secretKey = this.getSessionSecret();
+          const { payload } = await jwtVerify2(cookieValue, secretKey, {
+            algorithms: ["HS256"]
+          });
+          const { openId, appId, name } = payload;
+          if (!isNonEmptyString2(openId) || !isNonEmptyString2(appId) || !isNonEmptyString2(name)) {
+            console.warn("[Auth] Session payload missing required fields");
+            return null;
+          }
+          return {
+            openId,
+            appId,
+            name
+          };
+        } catch (error) {
+          console.warn("[Auth] Session verification failed", String(error));
+          return null;
+        }
+      }
+      async getUserInfoWithJwt(jwtToken) {
+        const payload = {
+          jwtToken,
+          projectId: ENV.appId
+        };
+        const { data } = await this.client.post(
+          GET_USER_INFO_WITH_JWT_PATH,
+          payload
+        );
+        const loginMethod = this.deriveLoginMethod(
+          data?.platforms,
+          data?.platform ?? data.platform ?? null
+        );
+        return {
+          ...data,
+          platform: loginMethod,
+          loginMethod
+        };
+      }
+      async authenticateRequest(req) {
+        const cookies = this.parseCookies(req.headers.cookie);
+        let sessionToken = cookies.get(COOKIE_NAME);
+        if (!sessionToken) {
+          const authHeader = req.headers.authorization;
+          if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
+            sessionToken = authHeader.slice(7);
+          }
+        }
+        const session = await this.verifySession(sessionToken);
+        if (!session) {
+          throw ForbiddenError("Invalid session cookie");
+        }
+        if (session.openId.startsWith(CRON_OPEN_ID_PREFIX)) {
+          const userInfo = await this.getUserInfoWithJwt(sessionToken ?? "");
+          const taskUid = userInfo.taskUid ?? null;
+          if (!taskUid) {
+            throw ForbiddenError("Cron session missing task_uid");
+          }
+          return buildCronUser(userInfo);
+        }
+        const sessionUserId = session.openId;
+        const signedInAt = /* @__PURE__ */ new Date();
+        let user = await getUserByOpenId(sessionUserId);
+        if (!user) {
+          try {
+            const userInfo = await this.getUserInfoWithJwt(sessionToken ?? "");
+            await upsertUser({
+              openId: userInfo.openId,
+              name: userInfo.name || null,
+              email: userInfo.email ?? null,
+              loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
+              lastSignedIn: signedInAt
+            });
+            user = await getUserByOpenId(userInfo.openId);
+          } catch (error) {
+            console.error("[Auth] Failed to sync user from OAuth:", error);
+            throw ForbiddenError("Failed to sync user info");
+          }
+        }
+        if (!user) {
+          throw ForbiddenError("User not found");
+        }
+        await upsertUser({
+          openId: user.openId,
+          lastSignedIn: signedInAt
+        });
+        return user;
+      }
+    };
+    CRON_OPEN_ID_PREFIX = "cron_";
+    sdk = new SDKServer();
+  }
+});
+
 // server/vercel-trpc.ts
 import express from "express";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 
-// shared/const.ts
-var COOKIE_NAME = "app_session_id";
-var ONE_YEAR_MS = 1e3 * 60 * 60 * 24 * 365;
-var AXIOS_TIMEOUT_MS = 3e4;
-var UNAUTHED_ERR_MSG = "Please login (10001)";
-var NOT_ADMIN_ERR_MSG = "You do not have required permission (10002)";
-var decodeOAuthState = (state) => {
-  let decoded;
-  try {
-    decoded = atob(state);
-  } catch {
-    return { redirectUri: "" };
-  }
-  try {
-    const parsed = JSON.parse(decoded);
-    if (parsed && typeof parsed.redirectUri === "string") return parsed;
-  } catch {
-  }
-  return { redirectUri: decoded };
-};
+// server/routers.ts
+init_const();
 
 // server/_core/cookies.ts
 function isSecureRequest(req) {
@@ -518,6 +1177,7 @@ function getSessionCookieOptions(req) {
 }
 
 // server/_core/externalAuth.ts
+init_const();
 import { timingSafeEqual } from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
 import { parse as parseCookieHeader } from "cookie";
@@ -673,6 +1333,7 @@ async function notifyOwner(payload) {
 }
 
 // server/_core/trpc.ts
+init_const();
 import { initTRPC, TRPCError as TRPCError2 } from "@trpc/server";
 import superjson from "superjson";
 var t = initTRPC.context().create({
@@ -731,369 +1392,8 @@ var systemRouter = router({
 });
 
 // server/routers.ts
+init_db();
 import { z as z2 } from "zod";
-
-// server/db.ts
-import { and, asc, desc, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
-import { createPool } from "mysql2/promise";
-
-// drizzle/schema.ts
-var schema_exports = {};
-__export(schema_exports, {
-  auditLog: () => auditLog,
-  backupSnapshots: () => backupSnapshots,
-  lojasPeriodos: () => lojasPeriodos,
-  rankingVendedores: () => rankingVendedores,
-  users: () => users
-});
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
-var users = mysqlTable("users", {
-  /**
-   * Surrogate primary key. Auto-incremented numeric value managed by the database.
-   * Use this for relations between tables.
-   */
-  id: int("id").autoincrement().primaryKey(),
-  /** Manus OAuth identifier (openId) returned from the OAuth callback. Unique per user. */
-  openId: varchar("openId", { length: 64 }).notNull().unique(),
-  name: text("name"),
-  email: varchar("email", { length: 320 }),
-  loginMethod: varchar("loginMethod", { length: 64 }),
-  role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull()
-});
-var lojasPeriodos = mysqlTable("lojas_periodos", {
-  id: int("id").autoincrement().primaryKey(),
-  periodo: varchar("periodo", { length: 32 }).notNull(),
-  loja: varchar("loja", { length: 128 }).notNull(),
-  vendasTotal: int("vendas_total").notNull(),
-  meta: int("meta").notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull()
-});
-var rankingVendedores = mysqlTable("ranking_vendedores", {
-  id: int("id").autoincrement().primaryKey(),
-  periodo: varchar("periodo", { length: 32 }).notNull(),
-  loja: varchar("loja", { length: 128 }).notNull(),
-  posicao: int("posicao").notNull(),
-  vendedor: varchar("vendedor", { length: 128 }).notNull(),
-  vendas: int("vendas").notNull(),
-  isDeleted: int("is_deleted").default(0).notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull()
-});
-var auditLog = mysqlTable("audit_log", {
-  id: int("id").autoincrement().primaryKey(),
-  usuario: varchar("usuario", { length: 255 }),
-  tabela: varchar("tabela", { length: 64 }).notNull(),
-  registro: varchar("registro", { length: 255 }),
-  campo: varchar("campo", { length: 64 }),
-  valorAntigo: text("valor_antigo"),
-  valorNovo: text("valor_novo"),
-  criadoEm: timestamp("criado_em").defaultNow().notNull()
-});
-var backupSnapshots = mysqlTable("backup_snapshots", {
-  id: int("id").autoincrement().primaryKey(),
-  criadoEm: timestamp("criado_em").defaultNow().notNull(),
-  usuario: varchar("usuario", { length: 255 }),
-  tipo: varchar("tipo", { length: 32 }).default("manual").notNull(),
-  /** Chave do arquivo JSON no storage (/manus-storage/...) */
-  storageKey: varchar("storage_key", { length: 255 }).notNull(),
-  descricao: varchar("descricao", { length: 255 }),
-  registrosLojas: int("registros_lojas").notNull().default(0),
-  registrosRanking: int("registros_ranking").notNull().default(0)
-});
-
-// server/db.ts
-init_env();
-var _db = null;
-var _pool = null;
-function databaseConnectionOptions(databaseUrl) {
-  const url = new URL(databaseUrl);
-  const isTiDBCloud = url.hostname.endsWith("tidbcloud.com");
-  return {
-    host: url.hostname,
-    port: Number(url.port || (isTiDBCloud ? 4e3 : 3306)),
-    user: decodeURIComponent(url.username),
-    password: decodeURIComponent(url.password),
-    database: decodeURIComponent(url.pathname.replace(/^\//, "")),
-    waitForConnections: true,
-    connectionLimit: 5,
-    enableKeepAlive: true,
-    ssl: isTiDBCloud ? { rejectUnauthorized: true } : void 0
-  };
-}
-async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
-    try {
-      _pool = createPool(databaseConnectionOptions(process.env.DATABASE_URL));
-      _db = drizzle(_pool, { schema: schema_exports, mode: "default" });
-    } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
-      _db = null;
-    }
-  }
-  return _db;
-}
-async function upsertUser(user) {
-  if (!user.openId) {
-    throw new Error("User openId is required for upsert");
-  }
-  const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot upsert user: database not available");
-    return;
-  }
-  try {
-    const values = {
-      openId: user.openId
-    };
-    const updateSet = {};
-    const textFields = ["name", "email", "loginMethod"];
-    const assignNullable = (field) => {
-      const value = user[field];
-      if (value === void 0) return;
-      const normalized = value ?? null;
-      values[field] = normalized;
-      updateSet[field] = normalized;
-    };
-    textFields.forEach(assignNullable);
-    if (user.lastSignedIn !== void 0) {
-      values.lastSignedIn = user.lastSignedIn;
-      updateSet.lastSignedIn = user.lastSignedIn;
-    }
-    if (user.role !== void 0) {
-      values.role = user.role;
-      updateSet.role = user.role;
-    } else if (user.openId === ENV.ownerOpenId) {
-      values.role = "admin";
-      updateSet.role = "admin";
-    }
-    if (!values.lastSignedIn) {
-      values.lastSignedIn = /* @__PURE__ */ new Date();
-    }
-    if (Object.keys(updateSet).length === 0) {
-      updateSet.lastSignedIn = /* @__PURE__ */ new Date();
-    }
-    await db.insert(users).values(values).onDuplicateKeyUpdate({
-      set: updateSet
-    });
-  } catch (error) {
-    console.error("[Database] Failed to upsert user:", error);
-    throw error;
-  }
-}
-async function getUserByOpenId(openId) {
-  const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot get user: database not available");
-    return void 0;
-  }
-  const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
-  return result.length > 0 ? result[0] : void 0;
-}
-function requireDb(db) {
-  if (!db) throw new Error("Database not available");
-  return db;
-}
-async function listLojasPeriodos() {
-  const db = requireDb(await getDb());
-  return db.select().from(lojasPeriodos).orderBy(asc(lojasPeriodos.periodo), asc(lojasPeriodos.loja));
-}
-async function listRankings() {
-  const db = requireDb(await getDb());
-  return db.select().from(rankingVendedores).where(eq(rankingVendedores.isDeleted, 0)).orderBy(asc(rankingVendedores.periodo), asc(rankingVendedores.loja), asc(rankingVendedores.posicao));
-}
-async function salvarLojaPeriodo(periodo, loja, vendasTotal, meta, usuario) {
-  const db = requireDb(await getDb());
-  const existing = await db.select().from(lojasPeriodos).where(and(eq(lojasPeriodos.periodo, periodo), eq(lojasPeriodos.loja, loja))).limit(1);
-  if (existing.length > 0) {
-    const antes = existing[0];
-    if (antes.vendasTotal !== vendasTotal || antes.meta !== meta) {
-      await db.insert(auditLog).values({
-        usuario: usuario ?? null,
-        tabela: "lojas_periodos",
-        registro: `${periodo}|${loja}`,
-        campo: "vendas_total,meta",
-        valorAntigo: `${antes.vendasTotal},${antes.meta}`,
-        valorNovo: `${vendasTotal},${meta}`
-      });
-    }
-    await db.update(lojasPeriodos).set({ vendasTotal, meta }).where(and(eq(lojasPeriodos.periodo, periodo), eq(lojasPeriodos.loja, loja)));
-  } else {
-    await db.insert(lojasPeriodos).values({ periodo, loja, vendasTotal, meta });
-    await db.insert(auditLog).values({
-      usuario: usuario ?? null,
-      tabela: "lojas_periodos",
-      registro: `${periodo}|${loja}`,
-      campo: "vendas_total,meta",
-      valorAntigo: null,
-      valorNovo: `${vendasTotal},${meta}`
-    });
-  }
-}
-async function adicionarPeriodo(periodo, usuario) {
-  const db = requireDb(await getDb());
-  await db.insert(auditLog).values({
-    usuario: usuario ?? null,
-    tabela: "lojas_periodos",
-    registro: periodo,
-    campo: "periodo",
-    valorAntigo: null,
-    valorNovo: "criado (lojas com valores zerados)"
-  });
-  return db.insert(lojasPeriodos).values({ periodo, loja: "__periodo__", vendasTotal: 0, meta: 0 });
-}
-async function substituirRanking(periodo, loja, vendedores, usuario) {
-  const db = requireDb(await getDb());
-  const existing = await db.select().from(rankingVendedores).where(and(eq(rankingVendedores.periodo, periodo), eq(rankingVendedores.loja, loja), eq(rankingVendedores.isDeleted, 0)));
-  for (const r of existing) {
-    await db.update(rankingVendedores).set({ isDeleted: 1 }).where(eq(rankingVendedores.id, r.id));
-  }
-  for (let i = 0; i < vendedores.length; i++) {
-    await db.insert(rankingVendedores).values({
-      periodo,
-      loja,
-      posicao: i + 1,
-      vendedor: vendedores[i].vendedor,
-      vendas: Math.round(vendedores[i].vendas * 100) / 100,
-      isDeleted: 0
-    });
-  }
-  await db.insert(auditLog).values({
-    usuario: usuario ?? null,
-    tabela: "ranking_vendedores",
-    registro: `${periodo}|${loja}`,
-    campo: "ranking completo",
-    valorAntigo: existing.length > 0 ? `${existing.length} registro(s)` : null,
-    valorNovo: `${vendedores.length} registro(s)`
-  });
-}
-async function removerVendedor(id, usuario) {
-  const db = requireDb(await getDb());
-  const rows = await db.select().from(rankingVendedores).where(eq(rankingVendedores.id, id)).limit(1);
-  if (rows.length === 0) return;
-  await db.update(rankingVendedores).set({ isDeleted: 1 }).where(eq(rankingVendedores.id, id));
-  await db.insert(auditLog).values({
-    usuario: usuario ?? null,
-    tabela: "ranking_vendedores",
-    registro: `${rows[0].periodo}|${rows[0].loja}|${rows[0].vendedor}`,
-    campo: "is_deleted",
-    valorAntigo: "0",
-    valorNovo: "1"
-  });
-  const restantes = await db.select().from(rankingVendedores).where(and(eq(rankingVendedores.periodo, rows[0].periodo), eq(rankingVendedores.loja, rows[0].loja), eq(rankingVendedores.isDeleted, 0))).orderBy(asc(rankingVendedores.posicao));
-  for (let i = 0; i < restantes.length; i++) {
-    if (restantes[i].posicao !== i + 1) {
-      await db.update(rankingVendedores).set({ posicao: i + 1 }).where(eq(rankingVendedores.id, restantes[i].id));
-    }
-  }
-}
-async function inserirRankingsEmLote(entradas, usuario) {
-  const db = requireDb(await getDb());
-  for (const e of entradas) {
-    await substituirRanking(e.periodo, e.loja, e.vendedores, usuario);
-  }
-}
-async function removerPeriodoRankings(periodo, usuario) {
-  const db = requireDb(await getDb());
-  const rows = await db.select().from(rankingVendedores).where(eq(rankingVendedores.periodo, periodo));
-  if (rows.length === 0) return;
-  for (const r of rows) {
-    await db.update(rankingVendedores).set({ isDeleted: 1 }).where(eq(rankingVendedores.id, r.id));
-  }
-  await db.insert(auditLog).values({
-    usuario: usuario ?? null,
-    tabela: "ranking_vendedores",
-    registro: periodo,
-    campo: "is_deleted",
-    valorAntigo: "0",
-    valorNovo: "1"
-  });
-}
-async function removerPeriodoLojas(periodo, usuario) {
-  const db = requireDb(await getDb());
-  await db.delete(lojasPeriodos).where(eq(lojasPeriodos.periodo, periodo));
-  await db.insert(auditLog).values({
-    usuario: usuario ?? null,
-    tabela: "lojas_periodos",
-    registro: periodo,
-    campo: "periodo",
-    valorAntigo: "existia",
-    valorNovo: "removido"
-  });
-}
-async function importarLote(lojas, rankings, usuario) {
-  const db = requireDb(await getDb());
-  const periodosDoLote = Array.from(new Set(lojas.map((l) => l.periodo)));
-  for (const p of periodosDoLote) {
-    await db.delete(rankingVendedores).where(eq(rankingVendedores.periodo, p));
-    await db.delete(lojasPeriodos).where(eq(lojasPeriodos.periodo, p));
-  }
-  for (const l of lojas) {
-    await db.insert(lojasPeriodos).values({
-      periodo: l.periodo,
-      loja: l.loja,
-      vendasTotal: l.vendasTotal,
-      meta: l.meta
-    });
-  }
-  for (const r of rankings) {
-    for (let i = 0; i < r.vendedores.length; i++) {
-      await db.insert(rankingVendedores).values({
-        periodo: r.periodo,
-        loja: r.loja,
-        posicao: i + 1,
-        vendedor: r.vendedores[i].vendedor,
-        vendas: Math.round(r.vendedores[i].vendas * 100) / 100,
-        isDeleted: 0
-      });
-    }
-  }
-  await db.insert(auditLog).values({
-    usuario: usuario ?? null,
-    tabela: "importacao_lote",
-    registro: periodosDoLote.join(","),
-    campo: "lojas,ranking",
-    valorAntigo: null,
-    valorNovo: `${lojas.length} loja(s), ${rankings.reduce((s, r) => s + r.vendedores.length, 0)} vendedor(es)`
-  });
-}
-async function resetarParaOficiais(usuario) {
-  const db = requireDb(await getDb());
-  await db.delete(auditLog).where(eq(auditLog.id, 0));
-  await db.delete(rankingVendedores).where(eq(rankingVendedores.isDeleted, 0));
-  await db.delete(lojasPeriodos);
-  await db.insert(auditLog).values({
-    usuario: usuario ?? null,
-    tabela: "reset_oficial",
-    registro: "todos",
-    campo: "lojas,ranking",
-    valorAntigo: "dados do banco",
-    valorNovo: "dados oficiais embutidos (Maio, Junho, Julho)"
-  });
-}
-async function insereBackup(meta) {
-  const db = requireDb(await getDb());
-  return db.insert(backupSnapshots).values(meta);
-}
-async function listarBackups() {
-  const db = requireDb(await getDb());
-  return db.select().from(backupSnapshots).orderBy(desc(backupSnapshots.criadoEm)).limit(50);
-}
-async function listarAuditoria(limit = 200) {
-  const db = requireDb(await getDb());
-  return db.select().from(auditLog).orderBy(desc(auditLog.criadoEm)).limit(limit);
-}
-async function snapshotCompleto() {
-  const db = requireDb(await getDb());
-  const lojas = await db.select().from(lojasPeriodos).orderBy(asc(lojasPeriodos.periodo), asc(lojasPeriodos.loja));
-  const rankings = await db.select().from(rankingVendedores).where(eq(rankingVendedores.isDeleted, 0)).orderBy(asc(rankingVendedores.periodo), asc(rankingVendedores.loja), asc(rankingVendedores.posicao));
-  const auditoria = await db.select().from(auditLog).orderBy(desc(auditLog.criadoEm));
-  return { geradoEm: (/* @__PURE__ */ new Date()).toISOString(), lojas, rankings, auditoria };
-}
-
-// server/routers.ts
 var appRouter = router({
   // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
@@ -1212,269 +1512,16 @@ var appRouter = router({
   })
 });
 
-// shared/_core/errors.ts
-var HttpError = class extends Error {
-  constructor(statusCode, message) {
-    super(message);
-    this.statusCode = statusCode;
-    this.name = "HttpError";
-  }
-};
-var ForbiddenError = (msg) => new HttpError(403, msg);
-
-// server/_core/sdk.ts
-import axios from "axios";
-import { parse as parseCookieHeader2 } from "cookie";
-import { SignJWT as SignJWT2, jwtVerify as jwtVerify2 } from "jose";
-init_env();
-var isNonEmptyString2 = (value) => typeof value === "string" && value.length > 0;
-var EXCHANGE_TOKEN_PATH = `/webdev.v1.WebDevAuthPublicService/ExchangeToken`;
-var GET_USER_INFO_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfo`;
-var GET_USER_INFO_WITH_JWT_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfoWithJwt`;
-var OAuthService = class {
-  constructor(client) {
-    this.client = client;
-    console.log("[OAuth] Initialized with baseURL:", ENV.oAuthServerUrl);
-    if (!ENV.oAuthServerUrl) {
-      console.error(
-        "[OAuth] ERROR: OAUTH_SERVER_URL is not configured! Set OAUTH_SERVER_URL environment variable."
-      );
-    }
-  }
-  decodeState(state) {
-    return decodeOAuthState(state).redirectUri;
-  }
-  async getTokenByCode(code, state) {
-    const payload = {
-      clientId: ENV.appId,
-      grantType: "authorization_code",
-      code,
-      redirectUri: this.decodeState(state)
-    };
-    const { data } = await this.client.post(
-      EXCHANGE_TOKEN_PATH,
-      payload
-    );
-    return data;
-  }
-  async getUserInfoByToken(token) {
-    const { data } = await this.client.post(
-      GET_USER_INFO_PATH,
-      {
-        accessToken: token.accessToken
-      }
-    );
-    return data;
-  }
-};
-var createOAuthHttpClient = () => axios.create({
-  baseURL: ENV.oAuthServerUrl,
-  timeout: AXIOS_TIMEOUT_MS
-});
-var SDKServer = class {
-  client;
-  oauthService;
-  constructor(client = createOAuthHttpClient()) {
-    this.client = client;
-    this.oauthService = new OAuthService(this.client);
-  }
-  deriveLoginMethod(platforms, fallback) {
-    if (fallback && fallback.length > 0) return fallback;
-    if (!Array.isArray(platforms) || platforms.length === 0) return null;
-    const set = new Set(
-      platforms.filter((p) => typeof p === "string")
-    );
-    if (set.has("REGISTERED_PLATFORM_EMAIL")) return "email";
-    if (set.has("REGISTERED_PLATFORM_GOOGLE")) return "google";
-    if (set.has("REGISTERED_PLATFORM_APPLE")) return "apple";
-    if (set.has("REGISTERED_PLATFORM_MICROSOFT") || set.has("REGISTERED_PLATFORM_AZURE"))
-      return "microsoft";
-    if (set.has("REGISTERED_PLATFORM_GITHUB")) return "github";
-    const first = Array.from(set)[0];
-    return first ? first.toLowerCase() : null;
-  }
-  /**
-   * Exchange OAuth authorization code for access token
-   * @example
-   * const tokenResponse = await sdk.exchangeCodeForToken(code, state);
-   */
-  async exchangeCodeForToken(code, state) {
-    return this.oauthService.getTokenByCode(code, state);
-  }
-  /**
-   * Get user information using access token
-   * @example
-   * const userInfo = await sdk.getUserInfo(tokenResponse.accessToken);
-   */
-  async getUserInfo(accessToken) {
-    const data = await this.oauthService.getUserInfoByToken({
-      accessToken
-    });
-    const loginMethod = this.deriveLoginMethod(
-      data?.platforms,
-      data?.platform ?? data.platform ?? null
-    );
-    return {
-      ...data,
-      platform: loginMethod,
-      loginMethod
-    };
-  }
-  parseCookies(cookieHeader) {
-    if (!cookieHeader) {
-      return /* @__PURE__ */ new Map();
-    }
-    const parsed = parseCookieHeader2(cookieHeader);
-    return new Map(Object.entries(parsed));
-  }
-  getSessionSecret() {
-    const secret = ENV.cookieSecret;
-    return new TextEncoder().encode(secret);
-  }
-  /**
-   * Create a session token for a Manus user openId
-   * @example
-   * const sessionToken = await sdk.createSessionToken(userInfo.openId);
-   */
-  async createSessionToken(openId, options = {}) {
-    return this.signSession(
-      {
-        openId,
-        appId: ENV.appId,
-        name: options.name || ""
-      },
-      options
-    );
-  }
-  async signSession(payload, options = {}) {
-    const issuedAt = Date.now();
-    const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
-    const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1e3);
-    const secretKey = this.getSessionSecret();
-    return new SignJWT2({
-      openId: payload.openId,
-      appId: payload.appId,
-      name: payload.name
-    }).setProtectedHeader({ alg: "HS256", typ: "JWT" }).setExpirationTime(expirationSeconds).sign(secretKey);
-  }
-  async verifySession(cookieValue) {
-    if (!cookieValue) {
-      console.warn("[Auth] Missing session cookie");
-      return null;
-    }
-    try {
-      const secretKey = this.getSessionSecret();
-      const { payload } = await jwtVerify2(cookieValue, secretKey, {
-        algorithms: ["HS256"]
-      });
-      const { openId, appId, name } = payload;
-      if (!isNonEmptyString2(openId) || !isNonEmptyString2(appId) || !isNonEmptyString2(name)) {
-        console.warn("[Auth] Session payload missing required fields");
-        return null;
-      }
-      return {
-        openId,
-        appId,
-        name
-      };
-    } catch (error) {
-      console.warn("[Auth] Session verification failed", String(error));
-      return null;
-    }
-  }
-  async getUserInfoWithJwt(jwtToken) {
-    const payload = {
-      jwtToken,
-      projectId: ENV.appId
-    };
-    const { data } = await this.client.post(
-      GET_USER_INFO_WITH_JWT_PATH,
-      payload
-    );
-    const loginMethod = this.deriveLoginMethod(
-      data?.platforms,
-      data?.platform ?? data.platform ?? null
-    );
-    return {
-      ...data,
-      platform: loginMethod,
-      loginMethod
-    };
-  }
-  async authenticateRequest(req) {
-    const cookies = this.parseCookies(req.headers.cookie);
-    let sessionToken = cookies.get(COOKIE_NAME);
-    if (!sessionToken) {
-      const authHeader = req.headers.authorization;
-      if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
-        sessionToken = authHeader.slice(7);
-      }
-    }
-    const session = await this.verifySession(sessionToken);
-    if (!session) {
-      throw ForbiddenError("Invalid session cookie");
-    }
-    if (session.openId.startsWith(CRON_OPEN_ID_PREFIX)) {
-      const userInfo = await this.getUserInfoWithJwt(sessionToken ?? "");
-      const taskUid = userInfo.taskUid ?? null;
-      if (!taskUid) {
-        throw ForbiddenError("Cron session missing task_uid");
-      }
-      return buildCronUser(userInfo);
-    }
-    const sessionUserId = session.openId;
-    const signedInAt = /* @__PURE__ */ new Date();
-    let user = await getUserByOpenId(sessionUserId);
-    if (!user) {
-      try {
-        const userInfo = await this.getUserInfoWithJwt(sessionToken ?? "");
-        await upsertUser({
-          openId: userInfo.openId,
-          name: userInfo.name || null,
-          email: userInfo.email ?? null,
-          loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
-          lastSignedIn: signedInAt
-        });
-        user = await getUserByOpenId(userInfo.openId);
-      } catch (error) {
-        console.error("[Auth] Failed to sync user from OAuth:", error);
-        throw ForbiddenError("Failed to sync user info");
-      }
-    }
-    if (!user) {
-      throw ForbiddenError("User not found");
-    }
-    await upsertUser({
-      openId: user.openId,
-      lastSignedIn: signedInAt
-    });
-    return user;
-  }
-};
-var CRON_OPEN_ID_PREFIX = "cron_";
-function buildCronUser(userInfo) {
-  const now = /* @__PURE__ */ new Date();
-  return {
-    id: -1,
-    openId: userInfo.openId,
-    name: userInfo.name || "Manus Scheduled Task",
-    email: null,
-    loginMethod: null,
-    role: "user",
-    createdAt: now,
-    updatedAt: now,
-    lastSignedIn: now,
-    taskUid: userInfo.taskUid ?? void 0,
-    isCron: true
-  };
-}
-var sdk = new SDKServer();
-
 // server/_core/context.ts
 async function createContext(opts) {
   let user = null;
   try {
-    user = isExternalAuthEnabled() ? await authenticateExternalRequest(opts.req) : await sdk.authenticateRequest(opts.req);
+    if (isExternalAuthEnabled()) {
+      user = await authenticateExternalRequest(opts.req);
+    } else {
+      const { sdk: sdk2 } = await Promise.resolve().then(() => (init_sdk(), sdk_exports));
+      user = await sdk2.authenticateRequest(opts.req);
+    }
   } catch (error) {
     user = null;
   }

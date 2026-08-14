@@ -1,7 +1,6 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
 import { authenticateExternalRequest, isExternalAuthEnabled } from "./externalAuth";
-import { sdk } from "./sdk";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
@@ -15,9 +14,12 @@ export async function createContext(
   let user: User | null = null;
 
   try {
-    user = isExternalAuthEnabled()
-      ? await authenticateExternalRequest(opts.req)
-      : await sdk.authenticateRequest(opts.req);
+    if (isExternalAuthEnabled()) {
+      user = await authenticateExternalRequest(opts.req);
+    } else {
+      const { sdk } = await import("./sdk");
+      user = await sdk.authenticateRequest(opts.req);
+    }
   } catch (error) {
     // Authentication is optional for public procedures.
     user = null;

@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { authenticateExternalLogin, isExternalAuthEnabled } from "./_core/externalAuth";
+import { createContext } from "./_core/context";
 
 const previous = {
   AUTH_MODE: process.env.AUTH_MODE,
   VERCEL: process.env.VERCEL,
   ADMIN_EMAIL: process.env.ADMIN_EMAIL,
   ADMIN_PASSWORD: process.env.ADMIN_PASSWORD,
+  OAUTH_SERVER_URL: process.env.OAUTH_SERVER_URL,
 };
 
 afterEach(() => {
@@ -13,6 +15,7 @@ afterEach(() => {
   process.env.VERCEL = previous.VERCEL;
   process.env.ADMIN_EMAIL = previous.ADMIN_EMAIL;
   process.env.ADMIN_PASSWORD = previous.ADMIN_PASSWORD;
+  process.env.OAUTH_SERVER_URL = previous.OAUTH_SERVER_URL;
 });
 
 describe("autenticação administrativa externa", () => {
@@ -37,5 +40,18 @@ describe("autenticação administrativa externa", () => {
     expect(authenticated?.role).toBe("admin");
     expect(authenticated?.openId).toBe("external-admin:admin@richesse.go");
     expect(rejected).toBeNull();
+  });
+
+  it("não inicializa OAuth Manus ao criar contexto externo sem sessão", async () => {
+    process.env.AUTH_MODE = "external";
+    process.env.VERCEL = "1";
+    process.env.OAUTH_SERVER_URL = "";
+
+    const context = await createContext({
+      req: { headers: {} },
+      res: {},
+    } as never);
+
+    expect(context.user).toBeNull();
   });
 });
