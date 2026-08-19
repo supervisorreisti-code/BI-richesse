@@ -228,12 +228,16 @@ export function DataBar({
   valor,
   cor,
   className,
+  maximo = 1.2,
 }: {
   valor: number; // 0..~1.2 (pode passar de 100%)
   cor?: string;
   className?: string;
+  /** Referência visual da barra; 1 significa 100% da largura disponível. */
+  maximo?: number;
 }) {
-  const pct = Math.min(Math.max(valor, 0), 1.2) / 1.2;
+  const referencia = maximo > 0 ? maximo : 1.2;
+  const pct = Math.min(Math.max(valor, 0), referencia) / referencia;
   const clampedPct = Math.min(pct * 100, 100);
   return (
     <div className={cn("h-1.5 w-full overflow-hidden rounded-full bg-muted", className)}>

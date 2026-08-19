@@ -125,14 +125,14 @@ O componente EvolucaoLojas.tsx (client/src/components/bi/EvolucaoLojas.tsx) já 
 
 # Fase atual: deploy externo do BI (Vercel ou alternativa)
 
-- [ ] Mapear a migração do banco integrado para um banco externo compatível com MySQL/TiDB, preservando os dados oficiais e backups.
-- [ ] Substituir dependências específicas da hospedagem atual, incluindo autenticação, por alternativas compatíveis com deploy externo.
-- [ ] Configurar e validar um deploy piloto no provedor externo escolhido, sem interromper o endereço atual.
-- [ ] Documentar as variáveis de ambiente, processo de publicação e recuperação do ambiente externo.
+- [x] Mapear a migração do banco integrado para um banco externo compatível com MySQL/TiDB, preservando os dados oficiais e backups.
+- [x] Substituir dependências específicas da hospedagem atual, incluindo autenticação, por alternativas compatíveis com deploy externo.
+- [x] Configurar e validar um deploy piloto no provedor externo escolhido, sem interromper o endereço atual.
+- [x] Documentar as variáveis de ambiente, processo de publicação e recuperação do ambiente externo.
 
 # Fase atual: migração completa para Vercel confirmada pelo usuário
 
-- [ ] Confirmar a conta Vercel conectada ao GitHub e criar o projeto externo a partir da branch main.
+- [x] Confirmar a conta Vercel conectada ao GitHub e criar o projeto externo a partir da branch main.
 - [x] Enviar a versão adaptada para o GitHub (commit `303f753` na branch `main`).
 - [x] Criar um cluster TiDB Cloud externo, aplicar o schema MySQL e migrar lojas, rankings, usuários, auditoria e metadados de backup (origem 0 → externo 0).
 - [x] Criar banco de aplicação dedicado `richesse_bi` e aplicar o schema completo no TiDB Cloud.
@@ -144,10 +144,25 @@ O componente EvolucaoLojas.tsx (client/src/components/bi/EvolucaoLojas.tsx) já 
 - [x] Adaptar o backend Express/tRPC para Vercel Functions, sem listener de porta e sem o runtime específico da hospedagem atual.
 - [x] Configurar conexão TLS explícita no `db.ts` para o endpoint público do TiDB Cloud em produção.
 - [x] Substituir Manus OAuth por autenticação externa de administrador e proteger a área de Administração.
+- [x] Aplicar guarda de rota no frontend: `/admin` redireciona visitantes sem sessão externa para `/login`.
+- [x] Validar a versão externa: TypeScript sem erros e 17 testes automatizados passando.
 - [x] Criar login externo com sessão JWT de 12 horas, credenciais administrativas em variáveis de ambiente e rota `/login`.
 - [x] Criar função serverless `api/[...path].ts`, configuração `vercel.json` e contrato de variáveis em `.env.vercel.example`.
 - [x] Substituir o storage de backups específico da hospedagem atual por armazenamento externo compatível com a Vercel (a vinculação do Blob será feita no projeto Vercel).
 - [x] Implementar Vercel Blob para os snapshots externos, preservando o storage atual quando em ambiente interno.
 - [x] Adicionar URLs temporárias de 10 minutos para o download de backups privados, sem expor o token de escrita no navegador.
 - [ ] Configurar as variáveis de ambiente na Vercel, testar importação, auditoria, backup, apresentação e a leitura de todos os períodos.
-- [ ] Publicar o endereço Vercel e registrar o procedimento de rollback/continuidade.
+- [x] Publicar o endereço Vercel e registrar o procedimento de rollback/continuidade.
+- [x] Documentar arquitetura, variáveis, validação, rollback e rotina operacional em `docs/vercel-operacao.md`.
+- [x] Corrigir a configuração de saída e roteamento da Vercel para servir a SPA em `/` e preservar a função tRPC em `/api/trpc`.
+- [x] Corrigir a guarda de `/admin` no modo externo: visitantes sem sessão devem ser direcionados para `/login` antes de visualizar ou editar dados.
+- [x] Corrigir a publicação da função tRPC em `/api/trpc`: a rota não pode retornar 404 na Vercel, pois isso impede login, persistência, auditoria e backups externos.
+- [x] Impedir que o contexto externo inicialize OAuth Manus: rotas públicas na Vercel devem operar com `AUTH_MODE=external` sem exigir `OAUTH_SERVER_URL`.
+- [ ] Validar com sessão administrativa real a aba Backups na Vercel: criar snapshot, confirmar registro no histórico e testar download por URL temporária.
+- [ ] Registrar no diagnóstico o resultado da validação real de backup externo após o teste no Admin.
+- [ ] Validar com a sessão administrativa real o login, a importação de relatório, o histórico de auditoria e a criação/download de backup.
+- [ ] Corrigir a detecção do ambiente externo de storage: backups na Vercel devem selecionar exclusivamente o Vercel Blob, sem tentar usar credenciais internas.
+- [x] Validar o modo Apresentar em tela cheia na implantação Vercel e registrar a continuidade operacional do endereço externo.
+- [x] Substituir a grade do modo Apresentar por slides sequenciais de loja, navegáveis por setas e teclado, com período, faturamento, meta e atingimento em hierarquia visual clara.
+- [x] Dar destaque independente à meta em cada slide, com comparação mensal organizada e controles de avanço, retorno, contador e saída da apresentação.
+- [x] Aplicar, para todos os vendedores, lojas e períodos, o cálculo vendas do vendedor ÷ vendas totais mensais da loja e substituir o rótulo “% do 1º” por “% das vendas da loja”.

@@ -22,6 +22,7 @@ import { Header, FiltrosDashboard, KpiCard, Panel, DataBar, fmtPct } from "@/com
 import { Filtros, fmtMoeda, totalVendas, totalMeta } from "@/lib/data";
 import { useDataStore, usePeriodosDisponiveis } from "@/lib/dataStore";
 import { useFiltrar } from "@/lib/useFiltrar";
+import { participacaoNasVendasDaLoja } from "@shared/ranking";
 
 export default function DetalheLoja() {
   const [filtros, setFiltros] = useState<Filtros>({
@@ -144,13 +145,13 @@ export default function DetalheLoja() {
                       <th className="w-14 py-2 pr-3 font-semibold text-muted-foreground">Pos.</th>
                       <th className="py-2 pr-3 font-semibold text-muted-foreground">Vendedor</th>
                       <th className="w-44 px-3 py-2 font-semibold text-muted-foreground">Vendas</th>
-                      <th className="px-3 py-2 font-semibold text-muted-foreground" />
+                      <th className="w-32 px-3 py-2 text-right font-semibold text-muted-foreground">% das vendas</th>
                     </tr>
                   </thead>
                   <tbody>
                     {ranking.map((r) => {
-                      const maxVendas = ranking[0]?.vendas ?? 1;
                       const primeiro = r.posicao === 1;
+                      const participacao = participacaoNasVendasDaLoja(r.vendas, vendas);
                       return (
                         <tr key={`${r.loja}|${r.vendedor}|${r.posicao}`} className="border-b border-border/60 last:border-0">
                           <td className="py-2.5 pr-3">
@@ -172,11 +173,11 @@ export default function DetalheLoja() {
                           </td>
                           <td className="px-3 py-2.5">
                             <div className="mb-1 text-right font-semibold tabular-nums text-navy">{fmtMoeda(r.vendas)}</div>
-                            <DataBar valor={r.vendas / maxVendas} cor="#17365D" />
+                            <DataBar valor={participacao} maximo={1} cor="#17365D" />
                           </td>
-                          <td className="px-3 py-2.5">
+                          <td className="px-3 py-2.5 text-right">
                             <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground tabular-nums">
-                              {((r.vendas / maxVendas) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 0 })}% do 1º
+                              {(participacao * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% das vendas
                             </span>
                           </td>
                         </tr>
