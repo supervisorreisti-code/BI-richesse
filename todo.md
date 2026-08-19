@@ -161,8 +161,11 @@ O componente EvolucaoLojas.tsx (client/src/components/bi/EvolucaoLojas.tsx) já 
 - [ ] Validar com sessão administrativa real a aba Backups na Vercel: criar snapshot, confirmar registro no histórico e testar download por URL temporária.
 - [ ] Registrar no diagnóstico o resultado da validação real de backup externo após o teste no Admin.
 - [ ] Validar com a sessão administrativa real o login, a importação de relatório, o histórico de auditoria e a criação/download de backup.
-- [ ] Corrigir a detecção do ambiente externo de storage: backups na Vercel devem selecionar exclusivamente o Vercel Blob, sem tentar usar credenciais internas.
+- [x] Corrigir e validar a detecção do ambiente externo de storage: backups na Vercel selecionam exclusivamente o Vercel Blob, sem tentar usar credenciais internas.
 - [x] Validar o modo Apresentar em tela cheia na implantação Vercel e registrar a continuidade operacional do endereço externo.
 - [x] Substituir a grade do modo Apresentar por slides sequenciais de loja, navegáveis por setas e teclado, com período, faturamento, meta e atingimento em hierarquia visual clara.
 - [x] Dar destaque independente à meta em cada slide, com comparação mensal organizada e controles de avanço, retorno, contador e saída da apresentação.
 - [x] Aplicar, para todos os vendedores, lojas e períodos, o cálculo vendas do vendedor ÷ vendas totais mensais da loja e substituir o rótulo “% do 1º” por “% das vendas da loja”.
+- [ ] Identificar, com base no relatório financeiro, a fórmula oficial do percentual por vendedor antes de substituir globalmente o indicador atual do ranking.
+- [ ] Substituir Ludmilla — incluindo variações de grafia já cadastradas — por Cristina em todos os registros de Richesse Eventos, sem alterar valores, posições ou períodos.
+- [ ] Impedir que a confirmação de uma edição de vendedor no Admin gere registros duplicados.

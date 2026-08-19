@@ -17,6 +17,7 @@ import {
   LojaPeriodo,
   RankingVendedor,
 } from "./data";
+import { atualizarRegistroDoRanking } from "@shared/ranking";
 
 const STORAGE_KEY = "bi-richesse:dados:v1";
 
@@ -141,7 +142,7 @@ interface DataContextValue {
   salvarLojaPeriodo: (registro: LojaPeriodo) => void;
   removerLojaPeriodo: (loja: string, periodo: string) => void;
   /** Atualiza um vendedor (edição ou criação) */
-  salvarVendedor: (registro: RankingVendedor) => void;
+  salvarVendedor: (registro: RankingVendedor, nomeAnterior?: string) => void;
   removerVendedor: (loja: string, periodo: string, vendedor: string) => void;
   /** Recalcula posições do ranking de um período (usado após exclusões) */
   reordenarRanking: (loja: string, periodo: string) => void;
@@ -328,14 +329,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   );
 
   const salvarVendedor = useCallback(
-    (registro: RankingVendedor) => {
+    (registro: RankingVendedor, nomeAnterior = registro.vendedor) => {
       // O ranking é enviado inteiro (substituição) para o banco garantir posições corretas
       const salvo = carregarDadosSalvos() ?? { lojasPeriodos: [...OFICIAIS_LOJAS], rankingVendedores: [...OFICIAIS_RANKING], salvoEm: new Date().toISOString() };
-      const idx = salvo.rankingVendedores.findIndex(
-        (r) => r.loja === registro.loja && r.periodo === registro.periodo && r.vendedor === registro.vendedor,
+      salvo.rankingVendedores = atualizarRegistroDoRanking(
+        salvo.rankingVendedores,
+        registro,
+        nomeAnterior,
       );
-      if (idx >= 0) salvo.rankingVendedores[idx] = registro;
-      else salvo.rankingVendedores.push(registro);
       const relacionados = (r: RankingVendedor) => r.loja === registro.loja && r.periodo === registro.periodo;
       const renumerado = recalcularRanking(salvo.rankingVendedores.filter(relacionados));
       salvo.rankingVendedores = [...salvo.rankingVendedores.filter((r) => !relacionados(r)), ...renumerado];

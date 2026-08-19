@@ -333,7 +333,7 @@ export default function Admin() {
     if (campo === "vendedor") {
       const nome = valor.trim();
       if (!nome || ranking.some((x) => x.vendedor === nome && x.vendedor !== r.vendedor)) return;
-      store.salvarVendedor({ ...r, vendedor: nome });
+      store.salvarVendedor({ ...r, vendedor: nome }, r.vendedor);
     } else {
       const n = parseMoeda(valor);
       if (n === null) return;
@@ -669,7 +669,9 @@ export default function Admin() {
                           <input
                             defaultValue={r.vendedor}
                             onBlur={(e) => atualizarVendedor(r, "vendedor", e.target.value)}
-                            onKeyDown={(e) => e.key === "Enter" && atualizarVendedor(r, "vendedor", (e.target as HTMLInputElement).value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") e.currentTarget.blur();
+                            }}
                             className="w-full rounded-md border border-input px-2.5 py-1.5 focus:ring-2 focus:ring-ring"
                           />
                         </td>
@@ -678,7 +680,9 @@ export default function Admin() {
                             inputMode="decimal"
                             defaultValue={moedaParaTexto(r.vendas)}
                             onBlur={(e) => atualizarVendedor(r, "vendas", e.target.value)}
-                            onKeyDown={(e) => e.key === "Enter" && atualizarVendedor(r, "vendas", (e.target as HTMLInputElement).value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") e.currentTarget.blur();
+                            }}
                             className="w-full rounded-md border border-input px-2.5 py-1.5 text-right tabular-nums focus:ring-2 focus:ring-ring"
                           />
                         </td>
